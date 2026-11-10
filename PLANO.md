@@ -109,6 +109,7 @@ Obs: o endpoint de ideia precisa aceitar **áudio (Core2) ou texto (Alexa)**.
 - [ ] Firmware: **PlatformIO + M5Unified (C++)** (recomendado) ou UIFlow/MicroPython
 - [x] Servidor: **PHP** (parceiro cuida)
 - [ ] Transcrição: Whisper API (simples) ou whisper.cpp local (sem custo)
+- [ ] Botão de gravar (segura pra falar, solta pra enviar): botão B de toque, toque no pato ou botão físico Grove?
 - [ ] Mapeamento de comidas acima
 - [x] Pato morto **revive** com prenda (ver "Morte e ressurreição")
 - [ ] Opinião do pato: só texto na tela ou também som no speaker?
