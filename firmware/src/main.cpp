@@ -850,6 +850,7 @@ static void desenhaBarra() {
 static constexpr int TAREFA_Y0 = 6, TAREFA_TEXTO_X = 40, TAREFA_LINHA = 18;
 static constexpr int TAREFA_ESPACO = 12;      // espaço entre cartões (dedo grosso)
 static constexpr int TAREFA_ALTURA_MIN = 42;  // cartão de 1 linha
+static constexpr int TOQUE_TOLERANCIA = 18;   // px que o dedo pode mexer e ainda contar como toque
 static constexpr int TAREFA_COL_DATA = 52;              // largura da coluna da data
 static constexpr int LISTA_ALTURA = BARRA_Y - 4;        // área visível (acima da barra)
 
@@ -904,7 +905,8 @@ static int tarefaEm(int yTela) {
   int y = TAREFA_Y0 - rolagem;
   for (int i = 0; i < qtdLembretes; i++) {
     int h = alturaTarefa(lembretes[i]);
-    if (yTela >= y && yTela < y + h) return i;
+    // área de toque inclui metade do vão acima e abaixo do cartão
+    if (yTela >= y - TAREFA_ESPACO / 2 && yTela < y + h + TAREFA_ESPACO / 2) return i;
     y += h + TAREFA_ESPACO;
   }
   return -1;
@@ -1351,7 +1353,7 @@ void loop() {
         if (t.base_y < LISTA_ALTURA) {
           if (toqueY0 < 0) { toqueY0 = t.base_y; rolagem0 = rolagem; arrastou = false; }
           int dy = t.y - toqueY0;
-          if (abs(dy) > 8) arrastou = true;
+          if (abs(dy) > TOQUE_TOLERANCIA) arrastou = true;  // touch do Core2 treme: só rola se mexer bem
           if (arrastou) {
             int alvo = rolagem0 - dy;
             puxado = alvo < 0 ? -alvo : 0;  // passou do topo: puxando pra atualizar
