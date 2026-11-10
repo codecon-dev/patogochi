@@ -24,12 +24,12 @@ static constexpr int SCREEN_W = 320;
 static constexpr int SCREEN_H = 240;
 static constexpr int DUCK_SCALE = 6;                         // 32px -> 192px
 static constexpr int DUCK_X = (SCREEN_W - 32 * DUCK_SCALE) / 2;
-static constexpr int GROUND_Y = 196;                         // linha do chão (embaixo fica a barra de ícones)
+static constexpr int GROUND_Y = 180;                         // linha do chão (embaixo fica a barra de ícones)
 static constexpr int DUCK_Y = GROUND_Y - 32 * DUCK_SCALE + 6;
 static constexpr int COCO_SCALE = 3;
 static constexpr int MAX_COCOS = 4;
 static constexpr int BARRA_Y = 204;                          // barra de ícones, em cima dos botões A/B/C
-static constexpr int ICONE_ESCALA = 2;                       // 16px -> 32px
+static constexpr int ICONE_ESCALA = 2;                       // 12px -> 24px
 static const int BOTAO_X[3] = {53, 160, 267};                // centro dos botões A, B, C
 
 // cores (RGB565)
@@ -524,38 +524,28 @@ static void desenhaSprite(const Sprite& s, uint16_t f, int x, int y, int escala)
   }
 }
 
-static uint16_t corDoIcone(char c, bool apagado) {
-  uint16_t cor;
-  switch (c) {
-    case 'k': cor = 0x2104; break;   // contorno
-    case 'w': cor = TFT_WHITE; break;
-    case 'g': cor = 0xAD55; break;   // cinza
-    case 'b': cor = 0x9A60; break;   // marrom (prancheta)
-    case 'y': cor = 0xFEA0; break;   // amarelo (clipe)
-    case 'r': cor = 0xE8E4; break;   // vermelho (coração)
-    case 's': cor = 0x8C71; break;   // cinza metal (microfone)
-    default:  return SPRITE_TRANSPARENT;
-  }
-  return apagado && c != 'k' ? 0x7BEF : cor;  // apagado = coração vazio
-}
-
-static void desenhaIcone(const char* const* icone, int cx, int cy, int escala, bool apagado = false) {
-  int x0 = cx - 8 * escala, y0 = cy - 8 * escala;
-  for (int j = 0; j < 16; j++)
-    for (int i = 0; i < 16; i++) {
-      uint16_t c = corDoIcone(icone[j][i], apagado);
-      if (c != SPRITE_TRANSPARENT) canvas.fillRect(x0 + i * escala, y0 + j * escala, escala, escala, c);
+// contorno = só a borda do desenho (ex.: coração vazio no status)
+static void desenhaIcone(const char* const* icone, int cx, int cy, int escala, bool contorno = false) {
+  int x0 = cx - ICONE_TAM * escala / 2, y0 = cy - ICONE_TAM * escala / 2;
+  auto cheio = [&](int i, int j) {
+    return i >= 0 && j >= 0 && i < ICONE_TAM && j < ICONE_TAM && icone[j][i] == 'k';
+  };
+  for (int j = 0; j < ICONE_TAM; j++)
+    for (int i = 0; i < ICONE_TAM; i++) {
+      if (!cheio(i, j)) continue;
+      if (contorno && cheio(i - 1, j) && cheio(i + 1, j) && cheio(i, j - 1) && cheio(i, j + 1)) continue;
+      canvas.fillRect(x0 + i * escala, y0 + j * escala, escala, escala, TFT_BLACK);
     }
 }
 
 // setas e check desenhados com primitivas (barra das telas internas)
 static void desenhaVoltar(int cx, int cy) {
-  canvas.fillTriangle(cx - 12, cy, cx - 2, cy - 10, cx - 2, cy + 10, COR_TEXTO);
-  canvas.fillRect(cx - 3, cy - 4, 15, 8, COR_TEXTO);
+  canvas.fillTriangle(cx - 10, cy, cx - 2, cy - 8, cx - 2, cy + 8, TFT_BLACK);
+  canvas.fillRect(cx - 3, cy - 3, 13, 6, TFT_BLACK);
 }
 static void desenhaSetaBaixo(int cx, int cy) {
-  canvas.fillTriangle(cx, cy + 12, cx - 10, cy + 2, cx + 10, cy + 2, COR_TEXTO);
-  canvas.fillRect(cx - 4, cy - 12, 8, 15, COR_TEXTO);
+  canvas.fillTriangle(cx, cy + 10, cx - 8, cy + 2, cx + 8, cy + 2, TFT_BLACK);
+  canvas.fillRect(cx - 3, cy - 10, 6, 13, TFT_BLACK);
 }
 static void desenhaCheck(int cx, int cy, uint16_t cor) {
   for (int d = -2; d <= 2; d++) {
@@ -565,7 +555,7 @@ static void desenhaCheck(int cx, int cy, uint16_t cor) {
 }
 
 static void desenhaBarra() {
-  int cy = BARRA_Y + 18;
+  int cy = BARRA_Y + 18;  // centro da barra (y ~222)
   if (tela == TELA_PATO) {
     desenhaIcone(ICONE_TAREFAS, BOTAO_X[0], cy, ICONE_ESCALA);
     desenhaIcone(ICONE_CORACAO, BOTAO_X[1], cy, ICONE_ESCALA);
@@ -574,7 +564,7 @@ static void desenhaBarra() {
     desenhaVoltar(BOTAO_X[0], cy);
     if (tela == TELA_TAREFAS && qtdLembretes > 0) {
       desenhaSetaBaixo(BOTAO_X[1], cy);
-      desenhaCheck(BOTAO_X[2], cy, COR_TEXTO);
+      desenhaCheck(BOTAO_X[2], cy, TFT_BLACK);
     }
   }
 }
@@ -633,7 +623,7 @@ static void desenhaTarefas() {
 static void desenhaStatus() {
   // fome em 5 corações
   int cheios = hp < 0 ? 0 : (hp + 19) / 20;
-  for (int i = 0; i < 5; i++) desenhaIcone(ICONE_CORACAO, 48 + i * 56, 52, 3, i >= cheios);
+  for (int i = 0; i < 5; i++) desenhaIcone(ICONE_CORACAO, 48 + i * 56, 52, 3, i >= cheios);  // vazio = contorno
   // lápide com o número de mortes
   int lx = SCREEN_W / 2, ly = 140;
   canvas.fillRoundRect(lx - 30, ly - 34, 60, 70, 24, 0x9CD3);
