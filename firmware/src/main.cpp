@@ -848,12 +848,14 @@ static void desenhaBarra() {
 
 // layout da lista: checkbox | texto inteiro quebrado em linhas | data fixa à direita
 static constexpr int TAREFA_Y0 = 6, TAREFA_TEXTO_X = 40, TAREFA_LINHA = 18;
+static constexpr int TAREFA_ESPACO = 12;      // espaço entre cartões (dedo grosso)
+static constexpr int TAREFA_ALTURA_MIN = 42;  // cartão de 1 linha
 static constexpr int TAREFA_COL_DATA = 52;              // largura da coluna da data
 static constexpr int LISTA_ALTURA = BARRA_Y - 4;        // área visível (acima da barra)
 
 static int alturaTarefa(const Lembrete& l) {
-  int h = l.nLinhas * TAREFA_LINHA + 10;
-  return h < 30 ? 30 : h;
+  int h = l.nLinhas * TAREFA_LINHA + 24;
+  return h < TAREFA_ALTURA_MIN ? TAREFA_ALTURA_MIN : h;
 }
 
 // quebra os textos que ainda não foram quebrados (precisa da fonte da lista)
@@ -886,7 +888,7 @@ static void preparaTarefas() {
 
 static int alturaLista() {
   int h = TAREFA_Y0;
-  for (int i = 0; i < qtdLembretes; i++) h += alturaTarefa(lembretes[i]) + 4;
+  for (int i = 0; i < qtdLembretes; i++) h += alturaTarefa(lembretes[i]) + TAREFA_ESPACO;
   return h;
 }
 
@@ -903,7 +905,7 @@ static int tarefaEm(int yTela) {
   for (int i = 0; i < qtdLembretes; i++) {
     int h = alturaTarefa(lembretes[i]);
     if (yTela >= y && yTela < y + h) return i;
-    y += h + 4;
+    y += h + TAREFA_ESPACO;
   }
   return -1;
 }
@@ -937,7 +939,7 @@ static void desenhaTarefas() {
     if (y + h > 0 && y < LISTA_ALTURA) {
       canvas.fillRoundRect(4, y, SCREEN_W - 8, h, 6, l.feito ? 0xC618 : TFT_WHITE);
       // checkbox
-      int bx = 12, by = y + 5;
+      int bx = 12, by = y + 11;
       canvas.drawRect(bx, by, 20, 20, COR_TEXTO);
       canvas.drawRect(bx + 1, by + 1, 18, 18, COR_TEXTO);
       if (l.feito) desenhaCheck(bx + 10, by + 9, 0x05E0);
@@ -946,7 +948,7 @@ static void desenhaTarefas() {
       canvas.setTextDatum(middle_left);
       canvas.setTextColor(l.feito ? 0x7BEF : COR_TEXTO);
       for (int k = 0; k < l.nLinhas; k++) {
-        int ly = y + 15 + k * TAREFA_LINHA;
+        int ly = y + 21 + k * TAREFA_LINHA;
         canvas.drawString(l.linhas[k], TAREFA_TEXTO_X, ly);
         if (l.feito) canvas.drawFastHLine(TAREFA_TEXTO_X, ly, canvas.textWidth(l.linhas[k]), 0x7BEF);
       }
@@ -954,10 +956,10 @@ static void desenhaTarefas() {
       if (l.prazo.length()) {
         canvas.setTextDatum(middle_right);
         canvas.setTextColor(l.vencido && !l.feito ? 0xC800 : COR_TEXTO);  // vencido = vermelho
-        canvas.drawString(l.prazo, SCREEN_W - 12, y + 15);
+        canvas.drawString(l.prazo, SCREEN_W - 12, y + 21);
       }
     }
-    y += h + 4;
+    y += h + TAREFA_ESPACO;
   }
   canvas.clearClipRect();
   canvas.setFont(&fonts::Font0);

@@ -206,21 +206,21 @@ function desenhaTarefas() {
   let y = 6 - ui.cursor;
   for (const l of lista) {
     const linhas = quebra(l.texto, W - X - 52 - 8);
-    const h = Math.max(30, linhas.length * LINHA + 10);
+    const h = Math.max(42, linhas.length * LINHA + 24);
     ctx.fillStyle = l.feito ? '#c0c0c0' : '#fff';
     ctx.beginPath(); ctx.roundRect(4, y, W - 8, h, 6); ctx.fill();
-    const bx = 12, by = y + 5;
+    const bx = 12, by = y + 11;
     ctx.strokeStyle = COR_TEXTO; ctx.lineWidth = 2; ctx.strokeRect(bx + 1, by + 1, 18, 18);
     if (l.feito) check(bx + 10, by + 9, '#00bc00');
     else if (l.marcando && Math.floor(performance.now() / 250) % 2) { ctx.fillStyle = '#aaa'; ctx.fillRect(bx + 5, by + 5, 10, 10); }
     linhas.forEach((t, k) => {
-      const ly = y + 15 + k * LINHA;
+      const ly = y + 21 + k * LINHA;
       texto(t, X, ly, l.feito ? '#7b7b7b' : COR_TEXTO, 16);
       if (l.feito) { ctx.fillStyle = '#7b7b7b'; ctx.fillRect(X, ly, ctx.measureText(t).width, 1); }
     });
     const prazo = l.prazo === '-' ? '' : l.prazo;
-    if (prazo) texto(prazo, W - 12, y + 15, l.vencido && !l.feito ? '#c80000' : COR_TEXTO, 16, 'right');
-    y += h + 4;
+    if (prazo) texto(prazo, W - 12, y + 21, l.vencido && !l.feito ? '#c80000' : COR_TEXTO, 16, 'right');
+    y += h + 12;
   }
   ctx.restore();
 }
