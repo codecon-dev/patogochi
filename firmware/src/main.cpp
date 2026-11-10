@@ -437,9 +437,9 @@ static void trataResposta() {
 // ---------- estado do servidor (o pato mora lá) ----------
 static volatile bool consultando = false;
 static bool consultandoEstado() { return consultando; }
-// GET /estado.php a cada 2 min. O sprite que o servidor manda (parado, triste_fome, morto...)
+// GET /estado.php a cada 10 s. O sprite que o servidor manda (parado, triste_fome, morto...)
 // vira o "estado base": é pra onde o pato volta quando não está gravando/comendo/reagindo.
-static constexpr uint32_t CONSULTA_MS = 2 * 60 * 1000;
+static constexpr uint32_t CONSULTA_MS = 10 * 1000;  // 10 s
 static uint32_t ultimaConsultaMs = 0;
 static bool jaConsultou = false;
 static volatile bool estadoPronto = false;
