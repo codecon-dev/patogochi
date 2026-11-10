@@ -7,3 +7,5 @@
 
 extern const int16_t SOM_QUACK[];
 extern const size_t SOM_QUACK_LEN;
+extern const int16_t SOM_QUACK_TRISTE[];
+extern const size_t SOM_QUACK_TRISTE_LEN;

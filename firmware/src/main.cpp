@@ -39,7 +39,8 @@ static M5Canvas canvas(&M5.Display);
 
 // ---------- quack ----------
 // Mesmo som em velocidades diferentes: mais rápido = agudo/feliz, mais lento = grave/enjoado.
-enum Quack { QUACK_NORMAL, QUACK_FELIZ, QUACK_ENJOADO, QUACK_MORTE };
+// Triste é outro arquivo (assets/sons/quack_triste.wav): arrastado e sumindo.
+enum Quack { QUACK_NORMAL, QUACK_FELIZ, QUACK_ENJOADO, QUACK_TRISTE, QUACK_MORTE };
 
 static void quack(Quack tipo) {
   uint32_t taxa = SOM_SAMPLE_RATE;
@@ -49,6 +50,9 @@ static void quack(Quack tipo) {
     case QUACK_FELIZ:  taxa = SOM_SAMPLE_RATE * 5 / 4; vezes = 2; break;  // agudo, duas vezes
     case QUACK_ENJOADO: taxa = SOM_SAMPLE_RATE * 2 / 3; break;             // grave e arrastado
     case QUACK_MORTE:  taxa = SOM_SAMPLE_RATE / 2; break;                 // bem lento
+    case QUACK_TRISTE:
+      M5.Speaker.playRaw(SOM_QUACK_TRISTE, SOM_QUACK_TRISTE_LEN, SOM_SAMPLE_RATE, false, 1, -1, true);
+      return;
   }
   M5.Speaker.playRaw(SOM_QUACK, SOM_QUACK_LEN, taxa, false, vezes, -1, true);
 }
@@ -59,6 +63,7 @@ static void quackDoEstado(Anim a) {
     case ANIM_EMPOLGADO:    quack(QUACK_FELIZ); break;
     case ANIM_DEBOCHANDO:   quack(QUACK_NORMAL); break;
     case ANIM_PASSANDO_MAL: quack(QUACK_ENJOADO); break;
+    case ANIM_TRISTE_FOME:  quack(QUACK_TRISTE); break;
     case ANIM_MORTO:        quack(QUACK_MORTE); break;
     default: break;
   }
@@ -176,6 +181,7 @@ void loop() {
   if (toque.wasPressed() && !revelandoComida && tocouNoPato(toque.x, toque.y)) {
     quack(estado == ANIM_EMPOLGADO ? QUACK_FELIZ
           : estado == ANIM_PASSANDO_MAL ? QUACK_ENJOADO
+          : estado == ANIM_TRISTE_FOME ? QUACK_TRISTE
           : estado == ANIM_MORTO ? QUACK_MORTE : QUACK_NORMAL);
   }
 
