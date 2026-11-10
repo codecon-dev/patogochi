@@ -61,20 +61,9 @@ for (const nome of FOOD_NAMES) {
   comidas[nome] = img;
 }
 
-// comida voando até o bico (mesma conta do firmware: posComida)
-const COMIDA_FRAMES = 11, BICO_X = DUCK_X + 3 * DUCK_SCALE, BICO_Y = DUCK_Y + 12 * DUCK_SCALE;
-const COMIDA_INI_X = 30, COMIDA_INI_Y = 24;
-function posComida(f) {
-  if (estado.anim !== 'comendo' || f >= COMIDA_FRAMES) return null;
-  const t = Math.min(f, 8);
-  return {
-    cx: COMIDA_INI_X + Math.trunc((BICO_X - COMIDA_INI_X) * t / 8),
-    cy: COMIDA_INI_Y + Math.trunc((BICO_Y - COMIDA_INI_Y) * t / 8),
-    esc: f <= 8 ? 3 : 11 - f,
-  };
-}
+const COMIDA_SCALE = 12;
 
-let estado = { anim: 'parado', frame: 0, cocos: 0, frameCoco: 0, comida: null };
+let estado = { anim: 'parado', frame: 0, cocos: 0, frameCoco: 0, comida: null, revelando: false };
 let fundo = 0;
 
 function desenha() {
@@ -84,17 +73,18 @@ function desenha() {
   } else if (FUNDOS[fundo] === 'verde') {
     ctx.fillStyle = '#00FF00'; ctx.fillRect(0, 0, W, H);
   }
+  const ci = comidas[estado.comida];
+  if (estado.revelando && ci) {
+    const w = 16 * COMIDA_SCALE;
+    ctx.drawImage(ci, (W - w) / 2, (H - w) / 2, w, w);
+    return;
+  }
   const frames = imgs[estado.anim];
   if (frames) {
     const img = frames[estado.frame % frames.length];
     ctx.drawImage(img, DUCK_X, DUCK_Y, 32 * DUCK_SCALE, 32 * DUCK_SCALE);
   }
-  const pc = posComida(estado.frame);
-  const ci = comidas[estado.comida];
-  if (pc && ci) {
-    const w = 16 * pc.esc;
-    ctx.drawImage(ci, pc.cx - Math.trunc(w / 2), pc.cy - Math.trunc(w / 2), w, w);
-  }
+
   for (let i = 0; i < estado.cocos && i < COCO_X.length; i++) {
     const img = imgs.coco[(estado.frameCoco + i * 3) % imgs.coco.length];
     ctx.drawImage(img, COCO_X[i], GROUND_Y - COCO_H * COCO_SCALE + 4, COCO_W * COCO_SCALE, COCO_H * COCO_SCALE);
@@ -105,7 +95,7 @@ function desenha() {
 function processaLinha(linha) {
   const p = linha.trim().split(' ');
   if (p[0] !== 'PATO' || p.length < 5) return;
-  estado = { anim: p[1], frame: +p[2], cocos: +p[3], frameCoco: +p[4], comida: p[5] || null };
+  estado = { anim: p[1], frame: +p[2], cocos: +p[3], frameCoco: +p[4], comida: p[5] || null, revelando: p[6] === '1' };
   statusEl.textContent = `conectado · ${estado.anim} frame ${estado.frame} · ${estado.cocos} cocô(s)`;
   desenha();
 }

@@ -43,11 +43,16 @@ static uint32_t ultimoCocoMs = 0;
 static int cocos = 0;
 static Food comida = FOOD_PIPOCA;  // troca a cada vez que ele termina de comer
 
-// comida voa até o bico nos primeiros frames de COMENDO
-static constexpr int COMIDA_FRAMES = 11;         // frames 0..10
-static constexpr int BICO_X = DUCK_X + 3 * DUCK_SCALE;
-static constexpr int BICO_Y = DUCK_Y + 12 * DUCK_SCALE;
-static constexpr int COMIDA_INI_X = 30, COMIDA_INI_Y = 24;
+// antes de comer: corte pra comida em tela cheia, depois o pato comendo
+static constexpr uint32_t REVELA_MS = 1500;
+static constexpr int COMIDA_SCALE = 12;          // 16px -> 192px
+static bool revelandoComida = false;
+static uint32_t inicioRevelaMs = 0;
+
+static void comecaRevelacao() {
+  revelandoComida = true;
+  inicioRevelaMs = millis();
+}
 
 // Desenha um frame ampliado, pulando os pixels transparentes.
 static void desenhaSprite(const Sprite& s, uint16_t f, int x, int y, int escala) {
@@ -61,27 +66,25 @@ static void desenhaSprite(const Sprite& s, uint16_t f, int x, int y, int escala)
   }
 }
 
-// posição (centro) e escala da comida no frame f; escala 0 = não desenha
-static void posComida(uint16_t f, int& cx, int& cy, int& escala) {
-  escala = 0;
-  if (estado != ANIM_COMENDO || f >= COMIDA_FRAMES) return;
-  int t = f < 8 ? f : 8;
-  cx = COMIDA_INI_X + (BICO_X - COMIDA_INI_X) * t / 8;
-  cy = COMIDA_INI_Y + (BICO_Y - COMIDA_INI_Y) * t / 8;
-  escala = f <= 8 ? 3 : 11 - f;  // encolhe entrando no bico
+static void enviaEspelho() {
+  // espelho: tools/espelho/ lê essa linha pelo USB e redesenha no navegador
+  Serial.printf("PATO %s %u %d %u %s %d\n", ANIMS[estado].name, frame, cocos, frameCoco,
+                FOODS[comida].name, revelandoComida ? 1 : 0);
 }
 
 static void desenhaCena() {
   canvas.fillScreen(COR_FUNDO);
 
-  desenhaSprite(ANIMS[estado], frame, DUCK_X, DUCK_Y, DUCK_SCALE);
-
-  int cx, cy, esc;
-  posComida(frame, cx, cy, esc);
-  if (esc > 0) {
+  if (revelandoComida) {
     const Sprite& c = FOODS[comida];
-    desenhaSprite(c, 0, cx - c.w * esc / 2, cy - c.h * esc / 2, esc);
+    desenhaSprite(c, 0, (SCREEN_W - c.w * COMIDA_SCALE) / 2, (SCREEN_H - c.h * COMIDA_SCALE) / 2,
+                  COMIDA_SCALE);
+    canvas.pushSprite(0, 0);
+    enviaEspelho();
+    return;
   }
+
+  desenhaSprite(ANIMS[estado], frame, DUCK_X, DUCK_Y, DUCK_SCALE);
 
   // cocôs alinhados no chão, alternando lados do pato
   const Sprite& coco = ANIMS[ANIM_COCO];
@@ -100,10 +103,7 @@ static void desenhaCena() {
   canvas.drawString("< estado     coco     estado >", SCREEN_W / 2, SCREEN_H - 2);
 
   canvas.pushSprite(0, 0);
-
-  // espelho: tools/espelho/ lê essa linha pelo USB e redesenha no navegador
-  Serial.printf("PATO %s %u %d %u %s\n", ANIMS[estado].name, frame, cocos, frameCoco,
-                FOODS[comida].name);
+  enviaEspelho();
 }
 
 static void trocaEstado(int delta) {
@@ -112,6 +112,8 @@ static void trocaEstado(int delta) {
   estado = (Anim)(((int)estado + delta + n) % n);
   frame = 0;
   ultimoFrameMs = millis();
+  revelandoComida = false;
+  if (estado == ANIM_COMENDO) comecaRevelacao();
 }
 
 void setup() {
@@ -132,10 +134,21 @@ void loop() {
   if (M5.BtnC.wasPressed()) { trocaEstado(+1); mudou = true; }
   if (M5.BtnB.wasPressed()) { cocos = (cocos + 1) % (MAX_COCOS + 1); mudou = true; }
 
-  if (agora - ultimoFrameMs >= FRAME_MS[estado]) {
+  if (revelandoComida) {
+    if (agora - inicioRevelaMs >= REVELA_MS) {
+      revelandoComida = false;
+      frame = 0;
+      ultimoFrameMs = agora;
+      mudou = true;
+    }
+  } else if (agora - ultimoFrameMs >= FRAME_MS[estado]) {
     frame = (frame + 1) % ANIMS[estado].frames;
-    if (frame == 0 && estado == ANIM_COMENDO) comida = (Food)((comida + 1) % FOOD_COUNT);
     ultimoFrameMs = agora;
+    // terminou de comer: próxima comida (debug, depois vem do servidor)
+    if (frame == 0 && estado == ANIM_COMENDO) {
+      comida = (Food)((comida + 1) % FOOD_COUNT);
+      comecaRevelacao();
+    }
     mudou = true;
   }
   if (cocos > 0 && agora - ultimoCocoMs >= FRAME_MS[ANIM_COCO]) {
