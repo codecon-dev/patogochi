@@ -695,20 +695,25 @@ static void desenhaCena() {
   }
 
   if (gravando) {
-    // bolinha vermelha piscando + segundos gravados
-    // bolinha acompanha o arraste; perto de cancelar vira um X
-    int bx = SCREEN_W - 20 + arrasteX / 2;
+    // na barra de baixo (os ícones somem enquanto grava), igual WhatsApp:
+    // segundos no meio, bolinha vermelha em cima do C acompanhando o arraste; perto de cancelar vira X
+    int cy = BARRA_Y + 18;
+    int bx = BOTAO_X[2] + arrasteX / 2;
     if (bx > SCREEN_W - 10) bx = SCREEN_W - 10;
     if (abs(arrasteX) > ARRASTE_CANCELA / 2) {
-      canvas.drawLine(bx - 7, 9, bx + 7, 23, COR_REC);
-      canvas.drawLine(bx - 7, 23, bx + 7, 9, COR_REC);
+      for (int d = -1; d <= 1; d++) {
+        canvas.drawLine(bx - 8 + d, cy - 8, bx + 8 + d, cy + 8, COR_REC);
+        canvas.drawLine(bx - 8 + d, cy + 8, bx + 8 + d, cy - 8, COR_REC);
+      }
     } else if ((millis() / 400) % 2) {
-      canvas.fillCircle(bx, 16, 7, COR_REC);
+      canvas.fillCircle(bx, cy, 8, COR_REC);
     }
+    canvas.setFont(&fonts::Font0);
     canvas.setTextColor(COR_TEXTO);
-    canvas.setTextDatum(middle_right);
+    canvas.setTextDatum(middle_center);
     canvas.setTextSize(2);
-    canvas.drawString(String(gravadas / (float)TAXA_MIC, 1) + "s", SCREEN_W - 32, 17);
+    canvas.drawString(String(gravadas / (float)TAXA_MIC, 1) + "s", BOTAO_X[1], cy);
+    canvas.setTextSize(1);
   }
 
   if (modoDebug) desenhaPainelDebug();
