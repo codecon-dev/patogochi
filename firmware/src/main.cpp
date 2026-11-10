@@ -227,8 +227,10 @@ static void tarefaEnvio(void*) {
   if (WiFi.status() != WL_CONNECTED) {
     r.erro = "sem wifi";
   } else {
-    HTTPClient http;
+    // ordem importa: o cliente precisa ser destruído DEPOIS do HTTPClient,
+    // senão o destrutor do HTTPClient usa um cliente que já morreu (crash)
     WiFiClientSecure seguro;
+    HTTPClient http;
     comecaHttp(http, seguro, "/ideia.php");
     http.addHeader("Content-Type", String("multipart/form-data; boundary=") + LIMITE);
     http.addHeader("X-Api-Token", PATO_TOKEN);
