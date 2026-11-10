@@ -32,7 +32,7 @@ const W = 320, H = 240, DUCK_SCALE = 6, DUCK_X = 64, GROUND_Y = 214;
 const DUCK_Y = GROUND_Y - 32 * DUCK_SCALE + 6;
 const COCO_SCALE = 3, COCO_W = 13, COCO_H = 14;
 const COCO_X = [12, W - 12 - COCO_W * COCO_SCALE, 60, W - 60 - COCO_W * COCO_SCALE];
-const COR_CEU = '#CEEFFF', COR_CHAO = '#9CD24A';
+const COR_FUNDO = '#9CD24A';
 const FUNDOS = ['cena', 'verde'];
 
 const tela = document.getElementById('tela');
@@ -59,8 +59,7 @@ let fundo = 0;
 function desenha() {
   ctx.clearRect(0, 0, W, H);
   if (FUNDOS[fundo] === 'cena') {
-    ctx.fillStyle = COR_CEU; ctx.fillRect(0, 0, W, H);
-    ctx.fillStyle = COR_CHAO; ctx.fillRect(0, GROUND_Y, W, H - GROUND_Y);
+    ctx.fillStyle = COR_FUNDO; ctx.fillRect(0, 0, W, H);
   } else if (FUNDOS[fundo] === 'verde') {
     ctx.fillStyle = '#00FF00'; ctx.fillRect(0, 0, W, H);
   }

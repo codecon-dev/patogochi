@@ -15,8 +15,7 @@ static constexpr int COCO_SCALE = 3;
 static constexpr int MAX_COCOS = 4;
 
 // cores (RGB565)
-static constexpr uint16_t COR_CEU = 0xCF7F;    // azul claro
-static constexpr uint16_t COR_CHAO = 0x9E89;   // verde grama
+static constexpr uint16_t COR_FUNDO = 0x9E89;  // verde
 static constexpr uint16_t COR_TEXTO = 0x2104;
 
 // ms por frame de cada animação (ajustar olhando no aparelho)
@@ -56,8 +55,7 @@ static void desenhaSprite(const Sprite& s, uint16_t f, int x, int y, int escala)
 }
 
 static void desenhaCena() {
-  canvas.fillScreen(COR_CEU);
-  canvas.fillRect(0, GROUND_Y, SCREEN_W, SCREEN_H - GROUND_Y, COR_CHAO);
+  canvas.fillScreen(COR_FUNDO);
 
   desenhaSprite(ANIMS[estado], frame, DUCK_X, DUCK_Y, DUCK_SCALE);
 
@@ -94,7 +92,6 @@ static void trocaEstado(int delta) {
 void setup() {
   auto cfg = M5.config();
   M5.begin(cfg);
-  M5.Display.setRotation(1);
   canvas.setPsram(true);
   canvas.setColorDepth(16);
   canvas.createSprite(SCREEN_W, SCREEN_H);
