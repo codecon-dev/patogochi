@@ -570,7 +570,12 @@ static constexpr int NOITE_INICIO = 21, NOITE_FIM = 7;  // 21h às 7h
 // Depois de desligado, o pato fica acordado mesmo antes do fim da noite.
 static constexpr int DESPERTA_HORA = 6, DESPERTA_MIN = 15;
 static constexpr uint32_t DESPERTA_MAX_MS = 10 * 60 * 1000;
-static constexpr uint32_t DESPERTA_QUACK_MS = 1500;
+// começa calmo e termina desesperado: em DESPERTA_RAMPA_MS o volume vai de baixo ao máximo
+// e o intervalo entre quacks cai de 2 s pra 0,35 s
+static constexpr uint32_t DESPERTA_RAMPA_MS = 60000;
+static constexpr uint32_t DESPERTA_INTERVALO_INI = 2000, DESPERTA_INTERVALO_FIM = 350;
+static constexpr int DESPERTA_VOL_INI = 40, DESPERTA_VOL_FIM = 255;
+static constexpr int VOLUME_NORMAL = 160;
 static bool despertando = false;
 static uint32_t inicioDespertarMs = 0, ultimoQuackDespertarMs = 0;
 static int diaDespertou = -1;     // tm_yday do último despertar (não tocar 2x no mesmo dia)
@@ -1202,7 +1207,7 @@ void setup() {
   canvas.setPsram(true);
   canvas.setColorDepth(16);
   canvas.createSprite(SCREEN_W, SCREEN_H);
-  M5.Speaker.setVolume(160);
+  M5.Speaker.setVolume(VOLUME_NORMAL);
   efeitosInicia();
 
   buffer = (uint8_t*)ps_malloc(FOLGA + 44 + MAX_AMOSTRAS * 2 + FOLGA);
@@ -1542,17 +1547,24 @@ void loop() {
         struct tm t;
         if (getLocalTime(&t, 0)) diaAcordou = t.tm_yday;
         Serial.println(desligou ? "LOG despertador desligado" : "LOG despertador parou sozinho");
+        M5.Speaker.setVolume(VOLUME_NORMAL);
         luz(LUZ_APAGADA);
         vibra(VIBRA_CURTA);
         voltaProBase(false);
         mudou = true;
-      } else if (agora - ultimoQuackDespertarMs >= DESPERTA_QUACK_MS) {
+      } else {
+        float r = (agora - inicioDespertarMs) / (float)DESPERTA_RAMPA_MS;
+        if (r > 1) r = 1;
+        uint32_t intervalo = DESPERTA_INTERVALO_INI - (uint32_t)(r * (DESPERTA_INTERVALO_INI - DESPERTA_INTERVALO_FIM));
+        if (agora - ultimoQuackDespertarMs >= intervalo) {
         ultimoQuackDespertarMs = agora;
-        quack(QUACK_FELIZ);
+        M5.Speaker.setVolume(DESPERTA_VOL_INI + (int)(r * (DESPERTA_VOL_FIM - DESPERTA_VOL_INI)));
+        quack(intervalo > 700 ? QUACK_FELIZ : QUACK_NORMAL);  // rápido demais pro quack duplo
         vibra(VIBRA_FESTA);
         luz(LUZ_FESTA);
         if (estado != ANIM_EMPOLGADO && estadoBase != ANIM_MORTO) mudaEstado(ANIM_EMPOLGADO, false);
         mudou = true;
+        }
       }
     }
   }
