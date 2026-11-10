@@ -576,6 +576,8 @@ struct Lembrete {
 static Lembrete lembretes[MAX_LEMBRETES];
 static int qtdLembretes = 0;
 static int rolagem = 0;  // px rolados na lista (arrasta pra cima/baixo)
+static int puxado = 0;   // px puxados além do topo (puxar pra atualizar)
+static constexpr int PUXAR_ATUALIZA = 60;
 enum CargaLembretes { CARGA_NADA, CARGA_CARREGANDO, CARGA_OK, CARGA_ERRO };
 static volatile CargaLembretes cargaLembretes = CARGA_NADA;
 static String erroLembretes;
@@ -873,19 +875,25 @@ static void desenhaTarefas() {
   canvas.setFont(&fonts::efontJA_16);
   canvas.setTextSize(1);
   canvas.setTextColor(COR_TEXTO);
+  int deslocamento = puxado / 2;  // a lista desce metade do que o dedo puxou
+  if (puxado > 0) {
+    canvas.setTextDatum(middle_center);
+    canvas.drawString(puxado >= PUXAR_ATUALIZA ? "solte pra atualizar" : "puxe pra atualizar",
+                      SCREEN_W / 2, deslocamento / 2 + 4);
+  }
   if (cargaLembretes == CARGA_CARREGANDO || cargaLembretes == CARGA_ERRO || qtdLembretes == 0) {
     canvas.setTextDatum(middle_center);
     canvas.drawString(cargaLembretes == CARGA_CARREGANDO ? String("carregando...")
                       : cargaLembretes == CARGA_ERRO     ? erroLembretes
                                                          : String("nenhuma tarefa \\o/"),
-                      SCREEN_W / 2, 100);
+                      SCREEN_W / 2, 100 + deslocamento);
     canvas.setFont(&fonts::Font0);
     return;
   }
   preparaTarefas();
   limitaRolagem();
-  canvas.setClipRect(0, 0, SCREEN_W, LISTA_ALTURA);
-  int y = TAREFA_Y0 - rolagem;
+  canvas.setClipRect(0, deslocamento, SCREEN_W, LISTA_ALTURA - deslocamento);
+  int y = TAREFA_Y0 - rolagem + deslocamento;
   for (int i = 0; i < qtdLembretes; i++) {
     const Lembrete& l = lembretes[i];
     int h = alturaTarefa(l);
@@ -1255,8 +1263,8 @@ void loop() {
     if (M5.BtnA.wasPressed() || agora - ultimoBotaoMs >= TELA_VOLTA_MS) {
       tela = TELA_PATO;
       mudou = true;
-    } else if (tela == TELA_TAREFAS && qtdLembretes > 0) {
-      // tocar numa tarefa marca; arrastar pra cima/baixo rola a lista
+    } else if (tela == TELA_TAREFAS && cargaLembretes != CARGA_CARREGANDO) {
+      // tocar numa tarefa marca; arrastar pra cima/baixo rola a lista; puxar no topo atualiza
       static int toqueY0 = -1, rolagem0 = 0;
       static bool arrastou = false;
       if (M5.Touch.getCount() > 0) {
@@ -1265,10 +1273,21 @@ void loop() {
           if (toqueY0 < 0) { toqueY0 = t.base_y; rolagem0 = rolagem; arrastou = false; }
           int dy = t.y - toqueY0;
           if (abs(dy) > 8) arrastou = true;
-          if (arrastou) { rolagem = rolagem0 - dy; limitaRolagem(); mudou = true; }
+          if (arrastou) {
+            int alvo = rolagem0 - dy;
+            puxado = alvo < 0 ? -alvo : 0;  // passou do topo: puxando pra atualizar
+            rolagem = alvo;
+            limitaRolagem();
+            mudou = true;
+          }
           ultimoBotaoMs = agora;
         }
       } else if (toqueY0 >= 0) {
+        if (puxado >= PUXAR_ATUALIZA) {
+          vibra(VIBRA_CURTA);
+          carregaLembretes();
+        }
+        puxado = 0;
         if (!arrastou) {
           int i = tarefaEm(toqueY0);
           if (i >= 0) marcaFeito(i);
