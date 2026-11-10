@@ -137,6 +137,8 @@ static size_t gravadas = 0;
 static bool gravando = false;
 static String ultimoErro;  // só pro rótulo de debug e pro log serial
 static uint32_t inicioGravacaoMs = 0;
+static constexpr uint32_t SOLTO_MS = 300;
+static uint32_t soltoDesdeMs = 0;
 
 static void escreveCabecalhoWav(size_t n) {
   uint32_t dados = n * 2, taxaBytes = TAXA_MIC * 2, tamanho = 36 + dados, fmt = 16;
@@ -154,6 +156,7 @@ static void comecaGravacao() {
   gravadas = 0;
   gravando = true;
   inicioGravacaoMs = millis();
+  soltoDesdeMs = 0;
   ultimoErro = "";
   mudaEstado(ANIM_OUVINDO, false);
 }
@@ -400,8 +403,19 @@ void loop() {
   if (!gravando && !enviando && M5.BtnB.wasHold()) { comecaGravacao(); mudou = true; }
   if (gravando) {
     continuaGravacao();
-    if (M5.BtnB.wasReleased() || M5.BtnB.isReleased()) {
-      if (terminaGravacao()) enviaIdeia();
+    // botão de toque falha por instantes: só conta como solto depois de SOLTO_MS sem toque
+    if (M5.BtnB.isPressed()) {
+      soltoDesdeMs = 0;
+    } else if (!soltoDesdeMs) {
+      soltoDesdeMs = agora;
+      Serial.printf("LOG B solto aos %.1fs (esperando confirmar)\n", (agora - inicioGravacaoMs) / 1000.0f);
+    }
+    if (soltoDesdeMs && agora - soltoDesdeMs >= SOLTO_MS) {
+      soltoDesdeMs = 0;
+      bool ok = terminaGravacao();
+      Serial.printf("LOG gravacao: segurou %.1fs, gravou %.1fs de audio\n",
+                    (agora - inicioGravacaoMs) / 1000.0f, gravadas / (float)TAXA_MIC);
+      if (ok) enviaIdeia();
       else mudaEstado(ANIM_PARADO, false);
       mudou = true;
     }
