@@ -165,6 +165,10 @@ static void mudaEstado(Anim novo, bool comSom = true) {
   }
 }
 
+// ---------- estado do pato que vem do servidor (preenchido pela consulta de estado) ----------
+static Anim estadoBase = ANIM_PARADO;
+static int hp = -1, mortes = 0, versaoServidor = -1;
+
 // ---------- gravação ----------
 static constexpr uint32_t TAXA_MIC = 16000;
 static constexpr size_t MAX_AMOSTRAS = TAXA_MIC * 15;      // 15 s (~480 KB)
@@ -221,7 +225,11 @@ static void comecaGravacao() {
   xInicioToque = -1;
   arrasteX = 0;
   ultimoErro = "";
-  mudaEstado(ANIM_OUVINDO, false);
+  if (estadoBase == ANIM_MORTO) {
+    luz(LUZ_REC);  // pato morto não "ouve": continua morto, só aparece a gravação
+  } else {
+    mudaEstado(ANIM_OUVINDO, false);
+  }
   vibra(VIBRA_CURTA);
 }
 
@@ -238,10 +246,6 @@ static bool terminaGravacao() {
   gravando = false;
   return gravadas >= MIN_AMOSTRAS;
 }
-
-// ---------- estado do pato que vem do servidor (preenchido pela consulta de estado) ----------
-static Anim estadoBase = ANIM_PARADO;
-static int hp = -1, mortes = 0, versaoServidor = -1;
 
 // ---------- envio pro servidor (roda numa tarefa separada pra animação não travar) ----------
 // O mesmo envio serve pra ideia (POST /ideia.php) e pra reviver (POST /reviver.php):
@@ -387,7 +391,8 @@ static void comecaEnvio(ModoEnvio modo) {
   envioDesdeMs = millis();
   enviando = true;
   respostaPronta = false;
-  if (modo != ENVIO_MASSAGEM) mudaEstado(ANIM_PENSANDO, false);
+  if (modo == ENVIO_IDEIA) mudaEstado(ANIM_PENSANDO, false);
+  else luz(LUZ_PENSANDO);  // reviver: pato continua morto esperando o veredito
   xTaskCreatePinnedToCore(tarefaEnvio, "envio", 16384, nullptr, 1, nullptr, 0);
 }
 
@@ -815,16 +820,8 @@ static void desenhaPainelDebug() {
   for (int i = 0; i < n; i++) canvas.drawString(linhas[i], 10, 8 + i * 12);
 }
 
-// lápide pequena com as mortes (fica pra sempre), massagem, bateria fraca
+// massagem, bateria fraca (a lápide com as mortes fica só na tela do coração)
 static void desenhaExtrasPato() {
-  if (mortes > 0) {
-    desenhaSprite(ANIMS[ANIM_LAPIDE], 0, 4, 4, 1);
-    canvas.setFont(&fonts::Font0);
-    canvas.setTextSize(1);
-    canvas.setTextColor(TFT_WHITE);
-    canvas.setTextDatum(middle_center);
-    canvas.drawString(String(mortes), 4 + 16, 4 + 17);
-  }
 
   if (estadoBase == ANIM_MORTO && batidas > 0) {
     // coração que pulsa a cada chacoalhada + barra de progresso das 30 batidas
@@ -950,6 +947,12 @@ static void tarefaWifi(void*) {
 }
 
 // ---------- setup / loop ----------
+// "já passaram `ms` desde `desde`?" usando o relógio de agora (não o `agora` do começo do loop,
+// que pode ser ANTERIOR a `desde` se ele foi marcado no meio do loop -> conta negativa vira gigante)
+static bool passou(uint32_t desde, uint32_t ms) {
+  return (int32_t)(millis() - desde) >= (int32_t)ms;
+}
+
 void setup() {
   auto cfg = M5.config();
   cfg.serial_baudrate = 115200;
@@ -1020,7 +1023,7 @@ void loop() {
     }
   }
   // desiste de requisições penduradas (rede caiu no meio, servidor travado...)
-  if (enviando && agora - envioDesdeMs >= ENVIO_DESISTE_MS) {
+  if (enviando && passou(envioDesdeMs, ENVIO_DESISTE_MS)) {
     Serial.println("LOG envio demorou demais: desistindo");
     envioId++;  // a tarefa antiga, se um dia voltar, é ignorada
     enviando = false;
@@ -1028,12 +1031,12 @@ void loop() {
     resposta.erro = "servidor demorou demais";
     respostaPronta = true;
   }
-  if (consultando && agora - ultimaConsultaMs >= CONSULTA_DESISTE_MS) {
+  if (consultando && passou(ultimaConsultaMs, CONSULTA_DESISTE_MS)) {
     Serial.println("LOG consulta de estado pendurada: liberando");
     consultaId++;
     consultando = false;
   }
-  if (cargaLembretes == CARGA_CARREGANDO && agora - ultimoBotaoMs >= CONSULTA_DESISTE_MS) {
+  if (cargaLembretes == CARGA_CARREGANDO && passou(ultimoBotaoMs, CONSULTA_DESISTE_MS)) {
     erroLembretes = "servidor demorou demais";
     cargaLembretes = CARGA_ERRO;
   }
@@ -1042,7 +1045,7 @@ void loop() {
 
   // consulta o servidor assim que o WiFi conecta e depois a cada CONSULTA_MS
   if (!gravando && WiFi.status() == WL_CONNECTED &&
-      (!jaConsultou || agora - ultimaConsultaMs >= CONSULTA_MS)) {
+      (!jaConsultou || passou(ultimaConsultaMs, CONSULTA_MS))) {
     consultaEstado();
   }
   if (estadoPronto) {

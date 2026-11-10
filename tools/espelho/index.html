@@ -151,10 +151,6 @@ function desenhaGravando() {
 }
 
 function desenhaExtrasPato() {
-  if (ui.mortes > 0 && imgs.lapide) {
-    ctx.drawImage(imgs.lapide[0], 4, 4, 32, 32);
-    texto(String(ui.mortes), 20, 21, '#fff', 9, 'center');
-  }
   if (ui.base === 'morto' && ui.batidas > 0) {
     const pulso = performance.now() - ultimaBatida < 150;
     desenhaIcone(icones.CORACAO, W / 2, 40, pulso ? 5 : 4);

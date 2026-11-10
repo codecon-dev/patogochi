@@ -37,7 +37,7 @@ Barra de ícones embaixo da tela, um por botão:
 - **Pato morto + segurar C:** grava o pedido de desculpas (vai pro `/reviver.php`)
 - **Segurar no pato 10 s:** liga/desliga o painel de debug (WiFi, IP, servidor, fome, hora, última gravação/resposta/erro, bateria)
 
-Sozinho: tela fica fraca depois de 1 min sem mexer, pato dorme entre 21h e 7h, cocôs = lembretes vencidos (vem do servidor), lápide pequena no canto conta as mortes, bateria piscando abaixo de 20%.
+Sozinho: tela fica fraca depois de 1 min sem mexer, pato dorme entre 21h e 7h, cocôs = lembretes vencidos (vem do servidor), bateria piscando abaixo de 20%.
 
 ## WiFi e servidor
 
