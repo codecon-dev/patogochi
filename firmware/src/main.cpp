@@ -568,10 +568,14 @@ static uint32_t ultimoBotaoMs = 0;
 
 // lembretes (GET /lembretes.php) — endpoint pedido pro back-end
 static constexpr int MAX_LEMBRETES = 20;
-struct Lembrete { int id; String texto; String prazo; bool vencido; bool feito; };
+static constexpr int MAX_LINHAS_TAREFA = 6;
+struct Lembrete {
+  int id; String texto; String prazo; bool vencido; bool feito;
+  String linhas[MAX_LINHAS_TAREFA]; int nLinhas;   // texto quebrado pra caber (calculado ao desenhar)
+};
 static Lembrete lembretes[MAX_LEMBRETES];
 static int qtdLembretes = 0;
-static int cursorLembrete = 0;
+static int rolagem = 0;  // px rolados na lista (arrasta pra cima/baixo)
 enum CargaLembretes { CARGA_NADA, CARGA_CARREGANDO, CARGA_OK, CARGA_ERRO };
 static volatile CargaLembretes cargaLembretes = CARGA_NADA;
 static String erroLembretes;
@@ -608,6 +612,7 @@ static void tarefaLembretes(void*) {
         lembretes[n].prazo = diaMes(l["vence_em"]);
         lembretes[n].vencido = l["vencido"] | false;
         lembretes[n].feito = false;
+      lembretes[n].nLinhas = 0;
         n++;
       }
       qtdLembretes = n;
@@ -628,7 +633,7 @@ static void carregaLembretes() {
   }
   cargaLembretes = CARGA_CARREGANDO;
   qtdLembretes = 0;
-  cursorLembrete = 0;
+  rolagem = 0;
   xTaskCreatePinnedToCore(tarefaLembretes, "lembretes", 12288, nullptr, 1, nullptr, 0);
 }
 
@@ -784,10 +789,6 @@ static void desenhaIcone(const char* const* icone, int cx, int cy, int escala, b
 static void desenhaVoltar(int cx, int cy) {
   desenhaIcone(ICONE_VOLTAR, cx, cy, ICONE_ESCALA);
 }
-static void desenhaSetaBaixo(int cx, int cy) {
-  canvas.fillTriangle(cx, cy + 10, cx - 8, cy + 2, cx + 8, cy + 2, TFT_BLACK);
-  canvas.fillRect(cx - 3, cy - 10, 6, 13, TFT_BLACK);
-}
 static void desenhaCheck(int cx, int cy, uint16_t cor) {
   for (int d = -2; d <= 2; d++) {
     canvas.drawLine(cx - 11, cy + d, cx - 4, cy + 7 + d, cor);
@@ -803,61 +804,117 @@ static void desenhaBarra() {
     desenhaIcone(ICONE_MICROFONE, BOTAO_X[2], cy, ICONE_ESCALA);
   } else {
     desenhaVoltar(BOTAO_X[0], cy);
-    if (tela == TELA_TAREFAS && qtdLembretes > 0) {
-      desenhaSetaBaixo(BOTAO_X[1], cy);
-      desenhaCheck(BOTAO_X[2], cy, TFT_BLACK);
-    }
   }
+}
+
+// layout da lista: checkbox | texto inteiro quebrado em linhas | data fixa à direita
+static constexpr int TAREFA_Y0 = 6, TAREFA_TEXTO_X = 40, TAREFA_LINHA = 18;
+static constexpr int TAREFA_COL_DATA = 52;              // largura da coluna da data
+static constexpr int LISTA_ALTURA = BARRA_Y - 4;        // área visível (acima da barra)
+
+static int alturaTarefa(const Lembrete& l) {
+  int h = l.nLinhas * TAREFA_LINHA + 10;
+  return h < 30 ? 30 : h;
+}
+
+// quebra os textos que ainda não foram quebrados (precisa da fonte da lista)
+static void preparaTarefas() {
+  canvas.setFont(&fonts::efontJA_16);
+  canvas.setTextSize(1);
+  int largura = SCREEN_W - TAREFA_TEXTO_X - TAREFA_COL_DATA - 8;
+  for (int i = 0; i < qtdLembretes; i++) {
+    Lembrete& l = lembretes[i];
+    if (l.nLinhas) continue;
+    String atual;
+    int ini = 0, len = l.texto.length();
+    while (ini <= len && l.nLinhas < MAX_LINHAS_TAREFA) {
+      int fim = l.texto.indexOf(' ', ini);
+      if (fim < 0) fim = len;
+      String palavra = l.texto.substring(ini, fim);
+      String teste = atual.length() ? atual + " " + palavra : palavra;
+      if (canvas.textWidth(teste) > largura && atual.length()) {
+        l.linhas[l.nLinhas++] = atual;
+        atual = palavra;
+      } else {
+        atual = teste;
+      }
+      ini = fim + 1;
+    }
+    if (atual.length() && l.nLinhas < MAX_LINHAS_TAREFA) l.linhas[l.nLinhas++] = atual;
+    if (!l.nLinhas) l.linhas[l.nLinhas++] = "";
+  }
+}
+
+static int alturaLista() {
+  int h = TAREFA_Y0;
+  for (int i = 0; i < qtdLembretes; i++) h += alturaTarefa(lembretes[i]) + 4;
+  return h;
+}
+
+static void limitaRolagem() {
+  int max = alturaLista() - LISTA_ALTURA;
+  if (rolagem > max) rolagem = max;
+  if (rolagem < 0) rolagem = 0;
+}
+
+// qual tarefa está na altura y da tela (-1 = nenhuma)
+static int tarefaEm(int yTela) {
+  preparaTarefas();
+  int y = TAREFA_Y0 - rolagem;
+  for (int i = 0; i < qtdLembretes; i++) {
+    int h = alturaTarefa(lembretes[i]);
+    if (yTela >= y && yTela < y + h) return i;
+    y += h + 4;
+  }
+  return -1;
 }
 
 static void desenhaTarefas() {
   canvas.setFont(&fonts::efontJA_16);
   canvas.setTextSize(1);
   canvas.setTextColor(COR_TEXTO);
-  canvas.setTextDatum(middle_left);
-  if (cargaLembretes == CARGA_CARREGANDO) {
+  if (cargaLembretes == CARGA_CARREGANDO || cargaLembretes == CARGA_ERRO || qtdLembretes == 0) {
     canvas.setTextDatum(middle_center);
-    canvas.drawString("carregando...", SCREEN_W / 2, 100);
-  } else if (cargaLembretes == CARGA_ERRO) {
-    canvas.setTextDatum(middle_center);
-    canvas.drawString(erroLembretes, SCREEN_W / 2, 100);
-  } else if (qtdLembretes == 0) {
-    canvas.setTextDatum(middle_center);
-    canvas.drawString("nenhuma tarefa \\o/", SCREEN_W / 2, 100);
-  } else {
-    // janela de até 6 linhas acompanhando o cursor
-    constexpr int VISIVEIS = 6, ALT = 32, Y0 = 8;
-    int primeiro = cursorLembrete - VISIVEIS + 1;
-    if (primeiro < 0) primeiro = 0;
-    for (int k = 0; k < VISIVEIS && primeiro + k < qtdLembretes; k++) {
-      int i = primeiro + k;
-      int y = Y0 + k * ALT;
-      const Lembrete& l = lembretes[i];
-      if (i == cursorLembrete) canvas.fillRoundRect(4, y, SCREEN_W - 8, ALT - 4, 6, TFT_WHITE);
+    canvas.drawString(cargaLembretes == CARGA_CARREGANDO ? String("carregando...")
+                      : cargaLembretes == CARGA_ERRO     ? erroLembretes
+                                                         : String("nenhuma tarefa \\o/"),
+                      SCREEN_W / 2, 100);
+    canvas.setFont(&fonts::Font0);
+    return;
+  }
+  preparaTarefas();
+  limitaRolagem();
+  canvas.setClipRect(0, 0, SCREEN_W, LISTA_ALTURA);
+  int y = TAREFA_Y0 - rolagem;
+  for (int i = 0; i < qtdLembretes; i++) {
+    const Lembrete& l = lembretes[i];
+    int h = alturaTarefa(l);
+    if (y + h > 0 && y < LISTA_ALTURA) {
+      canvas.fillRoundRect(4, y, SCREEN_W - 8, h, 6, l.feito ? 0xC618 : TFT_WHITE);
       // checkbox
-      int bx = 12, by = y + 4;
+      int bx = 12, by = y + 5;
       canvas.drawRect(bx, by, 20, 20, COR_TEXTO);
       canvas.drawRect(bx + 1, by + 1, 18, 18, COR_TEXTO);
-      bool marcando = marcandoId == l.id;
       if (l.feito) desenhaCheck(bx + 10, by + 9, 0x05E0);
-      else if (marcando && (millis() / 250) % 2) canvas.fillRect(bx + 5, by + 5, 10, 10, 0xAD55);
-      // texto (cortado pra caber) + prazo
-      String prazo = l.prazo;
-      int largPrazo = prazo.length() ? canvas.textWidth(prazo) + 8 : 0;
-      String t = l.texto;
-      while (t.length() > 1 && canvas.textWidth(t) > SCREEN_W - 50 - largPrazo) t.remove(t.length() - 1);
-      if (t.length() < l.texto.length()) t += "…";
+      else if (marcandoId == l.id && (millis() / 250) % 2) canvas.fillRect(bx + 5, by + 5, 10, 10, 0xAD55);
+      // texto inteiro
+      canvas.setTextDatum(middle_left);
       canvas.setTextColor(l.feito ? 0x7BEF : COR_TEXTO);
-      canvas.drawString(t, 40, y + 14);
-      if (prazo.length()) {
+      for (int k = 0; k < l.nLinhas; k++) {
+        int ly = y + 15 + k * TAREFA_LINHA;
+        canvas.drawString(l.linhas[k], TAREFA_TEXTO_X, ly);
+        if (l.feito) canvas.drawFastHLine(TAREFA_TEXTO_X, ly, canvas.textWidth(l.linhas[k]), 0x7BEF);
+      }
+      // data fixa à direita, na altura da primeira linha
+      if (l.prazo.length()) {
         canvas.setTextDatum(middle_right);
         canvas.setTextColor(l.vencido && !l.feito ? 0xC800 : COR_TEXTO);  // vencido = vermelho
-        canvas.drawString(prazo, SCREEN_W - 12, y + 14);
-        canvas.setTextDatum(middle_left);
+        canvas.drawString(l.prazo, SCREEN_W - 12, y + 15);
       }
-      if (l.feito) canvas.drawFastHLine(40, y + 14, canvas.textWidth(t), 0x7BEF);
     }
+    y += h + 4;
   }
+  canvas.clearClipRect();
   canvas.setFont(&fonts::Font0);
 }
 
@@ -1007,10 +1064,10 @@ static void enviaEspelho() {
                 FOODS[comida].name, revelandoComida ? 1 : 0);
   int bateria = M5.Power.getBatteryLevel();
   bool bateriaFraca = bateria >= 0 && bateria <= 20 && !M5.Power.isCharging();
-  // UI tela gravando decimos arraste mortes hp batidas bateriaFraca cursor carga base
+  // UI tela gravando decimos arraste mortes hp batidas bateriaFraca rolagem carga base exige
   Serial.printf("UI %d %d %d %d %d %d %d %d %d %d %s %d\n", (int)tela, gravando ? 1 : 0,
                 (int)(gravadas * 10 / TAXA_MIC), arrasteX, mortes, hp, batidas, bateriaFraca ? 1 : 0,
-                cursorLembrete, (int)cargaLembretes, ANIMS[estadoBase].name, (int)exigencia);
+                rolagem, (int)cargaLembretes, ANIMS[estadoBase].name, (int)exigencia);
   // lista de tarefas: no máximo 1x por segundo, só com a tela aberta
   static uint32_t ultimaListaMs = 0;
   if (tela == TELA_TAREFAS && millis() - ultimaListaMs > 1000) {
@@ -1199,8 +1256,26 @@ void loop() {
       tela = TELA_PATO;
       mudou = true;
     } else if (tela == TELA_TAREFAS && qtdLembretes > 0) {
-      if (M5.BtnB.wasPressed()) { cursorLembrete = (cursorLembrete + 1) % qtdLembretes; mudou = true; }
-      if (M5.BtnC.wasPressed()) { marcaFeito(cursorLembrete); mudou = true; }
+      // tocar numa tarefa marca; arrastar pra cima/baixo rola a lista
+      static int toqueY0 = -1, rolagem0 = 0;
+      static bool arrastou = false;
+      if (M5.Touch.getCount() > 0) {
+        auto t = M5.Touch.getDetail();
+        if (t.base_y < LISTA_ALTURA) {
+          if (toqueY0 < 0) { toqueY0 = t.base_y; rolagem0 = rolagem; arrastou = false; }
+          int dy = t.y - toqueY0;
+          if (abs(dy) > 8) arrastou = true;
+          if (arrastou) { rolagem = rolagem0 - dy; limitaRolagem(); mudou = true; }
+          ultimoBotaoMs = agora;
+        }
+      } else if (toqueY0 >= 0) {
+        if (!arrastou) {
+          int i = tarefaEm(toqueY0);
+          if (i >= 0) marcaFeito(i);
+        }
+        toqueY0 = -1;
+        mudou = true;
+      }
     }
   }
 
