@@ -29,7 +29,7 @@ static constexpr int DUCK_Y = GROUND_Y - 32 * DUCK_SCALE + 6;
 static constexpr int COCO_SCALE = 3;
 static constexpr int MAX_COCOS = 4;
 static constexpr int BARRA_Y = 204;                          // barra de ícones, em cima dos botões A/B/C
-static constexpr int ICONE_ESCALA = 1;                       // ícones Lucide 24px
+static constexpr int ICONE_ESCALA = 2;                       // 12px -> 24px
 static const int BOTAO_X[3] = {53, 160, 267};                // centro dos botões A, B, C
 
 // cores (RGB565)
@@ -538,6 +538,22 @@ static void desenhaIcone(const char* const* icone, int cx, int cy, int escala, b
     }
 }
 
+// setas e check desenhados com primitivas (barra das telas internas)
+static void desenhaVoltar(int cx, int cy) {
+  canvas.fillTriangle(cx - 10, cy, cx - 2, cy - 8, cx - 2, cy + 8, TFT_BLACK);
+  canvas.fillRect(cx - 3, cy - 3, 13, 6, TFT_BLACK);
+}
+static void desenhaSetaBaixo(int cx, int cy) {
+  canvas.fillTriangle(cx, cy + 10, cx - 8, cy + 2, cx + 8, cy + 2, TFT_BLACK);
+  canvas.fillRect(cx - 3, cy - 10, 6, 13, TFT_BLACK);
+}
+static void desenhaCheck(int cx, int cy, uint16_t cor) {
+  for (int d = -2; d <= 2; d++) {
+    canvas.drawLine(cx - 11, cy + d, cx - 4, cy + 7 + d, cor);
+    canvas.drawLine(cx - 4, cy + 7 + d, cx + 11, cy - 8 + d, cor);
+  }
+}
+
 static void desenhaBarra() {
   int cy = BARRA_Y + 18;  // centro da barra (y ~222)
   if (tela == TELA_PATO) {
@@ -545,10 +561,10 @@ static void desenhaBarra() {
     desenhaIcone(ICONE_CORACAO, BOTAO_X[1], cy, ICONE_ESCALA);
     desenhaIcone(ICONE_MICROFONE, BOTAO_X[2], cy, ICONE_ESCALA);
   } else {
-    desenhaIcone(ICONE_VOLTAR, BOTAO_X[0], cy, ICONE_ESCALA);
+    desenhaVoltar(BOTAO_X[0], cy);
     if (tela == TELA_TAREFAS && qtdLembretes > 0) {
-      desenhaIcone(ICONE_DESCE, BOTAO_X[1], cy, ICONE_ESCALA);
-      desenhaIcone(ICONE_CHECK, BOTAO_X[2], cy, ICONE_ESCALA);
+      desenhaSetaBaixo(BOTAO_X[1], cy);
+      desenhaCheck(BOTAO_X[2], cy, TFT_BLACK);
     }
   }
 }
@@ -582,7 +598,7 @@ static void desenhaTarefas() {
       canvas.drawRect(bx, by, 20, 20, COR_TEXTO);
       canvas.drawRect(bx + 1, by + 1, 18, 18, COR_TEXTO);
       bool marcando = marcandoId == l.id;
-      if (l.feito) desenhaIcone(ICONE_CHECK, bx + 10, by + 10, 1);
+      if (l.feito) desenhaCheck(bx + 10, by + 9, 0x05E0);
       else if (marcando && (millis() / 250) % 2) canvas.fillRect(bx + 5, by + 5, 10, 10, 0xAD55);
       // texto (cortado pra caber) + prazo
       String prazo = l.prazo;
@@ -607,8 +623,7 @@ static void desenhaTarefas() {
 static void desenhaStatus() {
   // fome em 5 corações
   int cheios = hp < 0 ? 0 : (hp + 19) / 20;
-  for (int i = 0; i < 5; i++)
-    desenhaIcone(i < cheios ? ICONE_CORACAO_CHEIO : ICONE_CORACAO, 40 + i * 60, 52, 2);
+  for (int i = 0; i < 5; i++) desenhaIcone(ICONE_CORACAO, 48 + i * 56, 52, 3, i >= cheios);  // vazio = contorno
   // lápide com o número de mortes
   int lx = SCREEN_W / 2, ly = 140;
   canvas.fillRoundRect(lx - 30, ly - 34, 60, 70, 24, 0x9CD3);
