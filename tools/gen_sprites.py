@@ -114,7 +114,8 @@ def main():
     OUT_H.parent.mkdir(exist_ok=True)
     OUT_H.write_text("\n".join(h))
     OUT_JS.write_text("// GERADO por tools/gen_sprites.py — não editar à mão\n"
-                      f"const FRAME_COUNTS = {json.dumps(counts)};\n")
+                      f"const FRAME_COUNTS = {json.dumps(counts)};\n"
+                      f"const FOOD_NAMES = {json.dumps([f for f, _ in COMIDAS])};\n")
     print(f"total: {total / 1024:.0f} KB em flash")
 
 

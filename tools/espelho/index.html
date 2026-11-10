@@ -53,7 +53,28 @@ for (const [nome, n] of Object.entries(FRAME_COUNTS)) {
   }
 }
 
-let estado = { anim: 'parado', frame: 0, cocos: 0, frameCoco: 0 };
+const comidas = {};
+for (const nome of FOOD_NAMES) {
+  const img = new Image();
+  img.src = `../../assets/sprites/comidas/${nome}.png`;
+  carregando.push(img.decode().catch(() => console.warn('falhou', img.src)));
+  comidas[nome] = img;
+}
+
+// comida voando até o bico (mesma conta do firmware: posComida)
+const COMIDA_FRAMES = 11, BICO_X = DUCK_X + 3 * DUCK_SCALE, BICO_Y = DUCK_Y + 12 * DUCK_SCALE;
+const COMIDA_INI_X = 30, COMIDA_INI_Y = 24;
+function posComida(f) {
+  if (estado.anim !== 'comendo' || f >= COMIDA_FRAMES) return null;
+  const t = Math.min(f, 8);
+  return {
+    cx: COMIDA_INI_X + Math.trunc((BICO_X - COMIDA_INI_X) * t / 8),
+    cy: COMIDA_INI_Y + Math.trunc((BICO_Y - COMIDA_INI_Y) * t / 8),
+    esc: f <= 8 ? 3 : 11 - f,
+  };
+}
+
+let estado = { anim: 'parado', frame: 0, cocos: 0, frameCoco: 0, comida: null };
 let fundo = 0;
 
 function desenha() {
@@ -68,6 +89,12 @@ function desenha() {
     const img = frames[estado.frame % frames.length];
     ctx.drawImage(img, DUCK_X, DUCK_Y, 32 * DUCK_SCALE, 32 * DUCK_SCALE);
   }
+  const pc = posComida(estado.frame);
+  const ci = comidas[estado.comida];
+  if (pc && ci) {
+    const w = 16 * pc.esc;
+    ctx.drawImage(ci, pc.cx - Math.trunc(w / 2), pc.cy - Math.trunc(w / 2), w, w);
+  }
   for (let i = 0; i < estado.cocos && i < COCO_X.length; i++) {
     const img = imgs.coco[(estado.frameCoco + i * 3) % imgs.coco.length];
     ctx.drawImage(img, COCO_X[i], GROUND_Y - COCO_H * COCO_SCALE + 4, COCO_W * COCO_SCALE, COCO_H * COCO_SCALE);
@@ -78,7 +105,7 @@ function desenha() {
 function processaLinha(linha) {
   const p = linha.trim().split(' ');
   if (p[0] !== 'PATO' || p.length < 5) return;
-  estado = { anim: p[1], frame: +p[2], cocos: +p[3], frameCoco: +p[4] };
+  estado = { anim: p[1], frame: +p[2], cocos: +p[3], frameCoco: +p[4], comida: p[5] || null };
   statusEl.textContent = `conectado · ${estado.anim} frame ${estado.frame} · ${estado.cocos} cocô(s)`;
   desenha();
 }
@@ -122,12 +149,13 @@ function pararDemo() { clearInterval(demoTimer); demoTimer = null; }
 function demo() {
   if (demoTimer) { pararDemo(); statusEl.textContent = 'demo parada'; return; }
   const anims = Object.keys(FRAME_COUNTS).filter(n => n !== 'coco');
-  let a = 0, f = 0, voltas = 0, fc = 0;
+  let a = 0, f = 0, voltas = 0, fc = 0, comidaDemo = 0;
   demoTimer = setInterval(() => {
     const n = FRAME_COUNTS[anims[a]];
     f++; fc = (fc + 1) % FRAME_COUNTS.coco;
     if (f >= n) { f = 0; if (++voltas >= Math.max(1, Math.ceil(12 / n))) { voltas = 0; a = (a + 1) % anims.length; } }
-    processaLinha(`PATO ${anims[a]} ${f} ${a % 5} ${fc}`);
+    if (f === 0 && anims[a] === 'comendo') comidaDemo = (comidaDemo + 1) % FOOD_NAMES.length;
+    processaLinha(`PATO ${anims[a]} ${f} ${a % 5} ${fc} ${FOOD_NAMES[comidaDemo]}`);
     statusEl.textContent = 'demo · ' + statusEl.textContent.replace(/^conectado · /, '');
   }, 120);
 }
