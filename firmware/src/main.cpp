@@ -57,6 +57,7 @@ static const uint16_t FRAME_MS[ANIM_COUNT] = {
   /* MORTO        */ 1000,
   /* TONTO        */ 120,
   /* LAPIDE       */ 1000,
+  /* FINGINDO     */ 60000,  // frame controlado à mão (ver fingindoMorto)
   /* COCO         */ 150,
 };
 
@@ -431,6 +432,10 @@ static void enviaGravacao() {
 
 static void voltaProBase(bool comSom);
 
+// "fingindo de morto": olho fechado -> abre e olha -> fecha -> volta pro morto (X)
+static constexpr uint32_t FINGINDO_ABRE_MS = 300, FINGINDO_FECHA_MS = 1500, FINGINDO_TOTAL_MS = 1900;
+static uint32_t inicioFingindoMs = 0;
+
 static void trataResposta() {
   respostaPronta = false;
   ultimoCodigo = resposta.codigo;
@@ -458,12 +463,12 @@ static void trataResposta() {
       mudaEstado(ANIM_EMPOLGADO);
       fimReacaoMs = millis() + REACAO_MS;
     } else {
-      // não convenceu: continua morto (TODO: animação "quase reviveu" quando o desenho chegar)
-      Serial.println("LOG reviver recusado: continua morto");
-      quack(QUACK_TRISTE);
-      vibra(VIBRA_DUPLA);
+      // não convenceu: abre o olho, desconfia, fecha e morre de novo
+      Serial.println("LOG reviver recusado: fingindo de morto");
       luz(LUZ_APAGADA);
-      voltaProBase(false);
+      mudaEstado(ANIM_FINGINDO, false);
+      inicioFingindoMs = millis();
+      fimReacaoMs = millis() + FINGINDO_TOTAL_MS;
     }
     return;
   }
@@ -1339,6 +1344,15 @@ void loop() {
             : estado == ANIM_TRISTE_FOME ? QUACK_TRISTE
             : estado == ANIM_MORTO ? QUACK_MORTE : QUACK_NORMAL);
     }
+  }
+
+  if (estado == ANIM_FINGINDO) {
+    uint32_t t = agora - inicioFingindoMs;
+    uint16_t f = (t >= FINGINDO_ABRE_MS && t < FINGINDO_FECHA_MS) ? 1 : 0;
+    if (f != frame) { frame = f; mudou = true; }
+    static bool somTocado = false;
+    if (t < FINGINDO_FECHA_MS) somTocado = false;
+    else if (!somTocado) { somTocado = true; quack(QUACK_MORTE); vibra(VIBRA_DUPLA); }
   }
 
   // fim da reação a uma ideia -> volta pro parado

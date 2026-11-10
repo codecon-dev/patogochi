@@ -31,6 +31,7 @@ ANIMS = [
     ("morto", "MORTO"),
     ("tonto", "TONTO"),
     ("lapide", "LAPIDE"),
+    ("fingindo", "FINGINDO"),
     ("coco", "COCO"),
 ]
 COMIDAS = [

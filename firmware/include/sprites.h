@@ -24,6 +24,7 @@ enum Anim : uint8_t {
   ANIM_MORTO,
   ANIM_TONTO,
   ANIM_LAPIDE,
+  ANIM_FINGINDO,
   ANIM_COCO,
   ANIM_COUNT
 };

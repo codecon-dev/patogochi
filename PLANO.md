@@ -62,6 +62,7 @@ Barra de ícones embaixo, um por botão:
 | `morto` | 1 | Único estado que vem do servidor (`sprite: morto`) | quack de morte | apagadas | bem longa |
 | `tonto` | 6 | Chacoalhou o pato vivo (4 s) | quack enjoado | azul girando | longa |
 | `lapide` | 1 | Tela de status, com o nº de mortes | | | |
+| `fingindo` | 2 | Súplica recusada: abre o olho, desconfia, fecha e morre de novo | quack de morte | apagadas | dupla |
 | `coco` | 8 | 1 por lembrete vencido (até 4) | | | |
 
 ## Comidas (`assets/sprites/comidas/`) — definido pela API
@@ -91,7 +92,7 @@ A cada morte o pato **sorteia** o que exige pra voltar (salvo no Core2, reinicia
 | **Massagem cardíaca** | ❤ pulando + "faça massagem cardíaca!" | 30 chacoalhadas a 100–120/min. Toca "Stayin' Alive" (103 bpm) subindo o volume + "tum-tum" a cada batida. Luz verde = no ritmo, laranja = quase, vermelha = recomeça. |
 | **Súplica** | 🎤 pulando + "segure o microfone e implore!" | Segura C e implora. Vai pro `/reviver.php` como `desculpa`; o Claude julga. |
 
-- Aceitou → revive `empolgado` com fome 50. Recusou → continua morto, quack choroso.
+- Aceitou → revive `empolgado` com fome 50. Recusou → `fingindo` (abre o olho, desconfia, fecha) e volta pro morto.
 - A outra forma fica desligada (microfone só vibra / chacoalhar não faz nada).
 - "Stayin' Alive" e o coração ficam em `assets/sons-privados/` (**fora do git**: direitos autorais).
 
@@ -120,7 +121,6 @@ A cada morte o pato **sorteia** o que exige pra voltar (salvo no Core2, reinicia
 ## O que falta
 
 **Firmware**
-- [ ] Animação "quase reviveu" (abre o olho e morre de novo) quando a súplica é recusada — aguardando desenho
 - [ ] Usar o estado que o `/marcar-feito.php` já devolve (economiza uma consulta)
 - [ ] Ajustar força/ritmo do tonto e da massagem depois de testar mais
 
