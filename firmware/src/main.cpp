@@ -1,8 +1,7 @@
 // Patogochi — etapa 2: o pato te ouve.
 // Botões de toque embaixo da tela:
-//   A = estado anterior (debug) · C = próximo estado (debug)
-//   B segurando = grava ideia (solta pra enviar) · B toque curto = põe/tira cocô (debug)
-// Toque no pato = quack.
+//   C (direita) segurando = grava ideia (solta pra enviar, arrasta pro lado pra cancelar)
+// Toque no pato = quack. Segurar no pato 10 s = painel de debug.
 #include <M5Unified.h>
 #include <WiFi.h>
 #include <HTTPClient.h>
@@ -168,7 +167,16 @@ static uint8_t* wav = nullptr;                             // cabeçalho (44 byt
 static int16_t* amostras = nullptr;
 static size_t gravadas = 0;
 static bool gravando = false;
-static String ultimoErro;  // só pro rótulo de debug e pro log serial
+static String ultimoErro;  // só pro painel de debug e pro log serial
+
+// ---------- painel de debug (segura em cima do pato por 10 s) ----------
+static constexpr uint32_t SEGURA_DEBUG_MS = 10000;
+static bool modoDebug = false;
+static uint32_t toqueNoPatoDesdeMs = 0;
+static bool debugJaAlternou = false;     // evita ligar/desligar várias vezes no mesmo toque
+static float ultimaSegurou = 0, ultimaGravou = 0;
+static int ultimoCodigo = 0;
+static String ultimaResposta;
 static uint32_t inicioGravacaoMs = 0;
 static constexpr uint32_t SOLTO_MS = 300;
 static uint32_t soltoDesdeMs = 0;
@@ -218,7 +226,8 @@ static bool terminaGravacao() {
 // API: https://patogochi.codegus.com/docs.html
 struct Resposta {
   bool ok = false;
-  String erro;
+  String erro, corpo;
+  int codigo = 0;
   int comida = -1;                 // índice em FOODS, -1 = nenhuma
   Anim reacao = ANIM_EMPOLGADO;
 };
@@ -283,6 +292,8 @@ static void tarefaEnvio(void*) {
     String corpo = codigo > 0 ? http.getString() : "";
     http.end();
     Serial.printf("LOG POST /ideia.php -> %d %s\n", codigo, corpo.c_str());
+    r.codigo = codigo;
+    r.corpo = corpo;
 
     JsonDocument doc;
     bool jsonOk = !deserializeJson(doc, corpo);
@@ -316,6 +327,8 @@ static void enviaIdeia() {
 
 static void trataResposta() {
   respostaPronta = false;
+  ultimoCodigo = resposta.codigo;
+  ultimaResposta = resposta.corpo;
   if (!resposta.ok) {
     // nada escrito na tela: o pato só debocha (erro vai pro log e pro rótulo de debug)
     ultimoErro = resposta.erro;
@@ -346,6 +359,30 @@ static void desenhaSprite(const Sprite& s, uint16_t f, int x, int y, int escala)
       canvas.fillRect(x + i * escala, y + j * escala, escala, escala, c);
     }
   }
+}
+
+static void desenhaPainelDebug() {
+  String linhas[12];
+  int n = 0;
+  bool wifiOk = WiFi.status() == WL_CONNECTED;
+  linhas[n++] = "DEBUG  (segura no pato 10s pra fechar)";
+  linhas[n++] = "estado: " + String(ANIMS[estado].name) + "   cocos: " + String(cocos);
+  linhas[n++] = wifiOk ? "wifi: " + WiFi.SSID() + "  " + String(WiFi.RSSI()) + " dBm" : "wifi: DESCONECTADO";
+  linhas[n++] = "ip: " + (wifiOk ? WiFi.localIP().toString() : String("-"));
+  linhas[n++] = "servidor: " + String(SERVIDOR_URL);
+  linhas[n++] = "ultima gravacao: segurou " + String(ultimaSegurou, 1) + "s, audio " + String(ultimaGravou, 1) + "s";
+  linhas[n++] = "ultima resposta: " + (ultimoCodigo ? String(ultimoCodigo) : String("-"));
+  linhas[n++] = "  " + ultimaResposta.substring(0, 48);
+  linhas[n++] = "ultimo erro: " + (ultimoErro.length() ? ultimoErro : String("-"));
+  linhas[n++] = "bateria: " + String(M5.Power.getBatteryLevel()) + "%" + (M5.Power.isCharging() ? " (carregando)" : "");
+  linhas[n++] = "ligado ha " + String(millis() / 60000) + " min   psram livre: " + String(ESP.getFreePsram() / 1024) + " KB";
+
+  canvas.fillRoundRect(4, 4, SCREEN_W - 8, n * 12 + 8, 6, TFT_BLACK);
+  canvas.setFont(&fonts::Font0);
+  canvas.setTextSize(1);
+  canvas.setTextColor(TFT_GREEN);
+  canvas.setTextDatum(top_left);
+  for (int i = 0; i < n; i++) canvas.drawString(linhas[i], 10, 8 + i * 12);
 }
 
 static void desenhaCena() {
@@ -387,18 +424,7 @@ static void desenhaCena() {
     canvas.drawString(String(gravadas / (float)TAXA_MIC, 1) + "s", SCREEN_W - 32, 17);
   }
 
-  // rótulos de debug
-  canvas.setTextColor(COR_TEXTO);
-  canvas.setTextSize(1);
-  if (!gravando) {
-    canvas.setTextDatum(top_left);
-    canvas.drawString(ultimoErro.length() ? ANIMS[estado].name + String(" | ") + ultimoErro
-                                          : String(ANIMS[estado].name), 6, 6);
-  }
-  canvas.setTextDatum(bottom_left);
-  canvas.drawString(WiFi.status() == WL_CONNECTED ? "wifi ok" : "sem wifi", 6, SCREEN_H - 2);
-  canvas.setTextDatum(bottom_center);
-  canvas.drawString("< estado   segura: fala   estado >", SCREEN_W / 2 + 20, SCREEN_H - 2);
+  if (modoDebug) desenhaPainelDebug();
 
   canvas.pushSprite(0, 0);
   enviaEspelho();
@@ -408,14 +434,6 @@ static void enviaEspelho() {
   // espelho: tools/espelho/ lê essa linha pelo USB e redesenha no navegador
   Serial.printf("PATO %s %u %d %u %s %d\n", ANIMS[estado].name, frame, cocos, frameCoco,
                 FOODS[comida].name, revelandoComida ? 1 : 0);
-}
-
-static void trocaEstadoDebug(int delta) {
-  // COCO é overlay, não estado do pato: pula ele
-  int n = ANIM_COCO;
-  comendoIdeia = false;
-  fimReacaoMs = 0;
-  mudaEstado((Anim)(((int)estado + delta + n) % n));
 }
 
 // ---------- setup / loop ----------
@@ -447,8 +465,8 @@ void loop() {
   uint32_t agora = millis();
   bool mudou = false;
 
-  // gravação: segura B pra falar, solta pra enviar
-  if (!gravando && !enviando && M5.BtnB.wasHold()) { comecaGravacao(); mudou = true; }
+  // gravação: segura C (direita, como no WhatsApp) pra falar, solta pra enviar
+  if (!gravando && !enviando && M5.BtnC.wasHold()) { comecaGravacao(); mudou = true; }
   if (gravando) {
     continuaGravacao();
     // "segurando" = qualquer toque na tela, assim dá pra arrastar pra fora do B.
@@ -472,6 +490,8 @@ void loop() {
     if (gravando && soltoDesdeMs && agora - soltoDesdeMs >= SOLTO_MS) {
       soltoDesdeMs = 0;
       bool ok = terminaGravacao();
+      ultimaSegurou = (agora - inicioGravacaoMs) / 1000.0f;
+      ultimaGravou = gravadas / (float)TAXA_MIC;
       Serial.printf("LOG gravacao: segurou %.1fs, gravou %.1fs de audio\n",
                     (agora - inicioGravacaoMs) / 1000.0f, gravadas / (float)TAXA_MIC);
       if (ok) enviaIdeia();
@@ -483,11 +503,23 @@ void loop() {
 
   bool ocupado = gravando || enviando;
   if (!ocupado) {
-    if (M5.BtnA.wasPressed()) { trocaEstadoDebug(-1); mudou = true; }
-    if (M5.BtnC.wasPressed()) { trocaEstadoDebug(+1); mudou = true; }
-    if (M5.BtnB.wasClicked()) { cocos = (cocos + 1) % (MAX_COCOS + 1); mudou = true; }
-
     auto toque = M5.Touch.getDetail();
+
+    // segurar em cima do pato por 10 s liga/desliga o painel de debug
+    if (M5.Touch.getCount() > 0 && tocouNoPato(toque.base_x, toque.base_y)) {
+      if (!toqueNoPatoDesdeMs) toqueNoPatoDesdeMs = agora;
+      if (!debugJaAlternou && agora - toqueNoPatoDesdeMs >= SEGURA_DEBUG_MS) {
+        modoDebug = !modoDebug;
+        debugJaAlternou = true;
+        vibra(VIBRA_DUPLA);
+        Serial.printf("LOG modo debug %s\n", modoDebug ? "ligado" : "desligado");
+        mudou = true;
+      }
+    } else {
+      toqueNoPatoDesdeMs = 0;
+      debugJaAlternou = false;
+    }
+
     if (toque.wasPressed() && !revelandoComida && tocouNoPato(toque.x, toque.y)) {
       vibra(VIBRA_CURTA);
       quack(estado == ANIM_EMPOLGADO ? QUACK_FELIZ
@@ -535,6 +567,7 @@ void loop() {
     mudou = true;
   }
   if (gravando) mudou = true;  // atualiza o contador de segundos
+  if (modoDebug && agora % 1000 < 15) mudou = true;  // painel atualiza ~1x por segundo
 
   efeitosAtualiza(agora);
   if (mudou) desenhaCena();
