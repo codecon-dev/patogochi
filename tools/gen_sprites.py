@@ -29,6 +29,8 @@ ANIMS = [
     ("triste_fome", "TRISTE_FOME"),
     ("dormindo", "DORMINDO"),
     ("morto", "MORTO"),
+    ("tonto", "TONTO"),
+    ("lapide", "LAPIDE"),
     ("coco", "COCO"),
 ]
 COMIDAS = [

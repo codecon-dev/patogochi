@@ -49,6 +49,8 @@ static const uint16_t FRAME_MS[ANIM_COUNT] = {
   /* TRISTE_FOME  */ 90,
   /* DORMINDO     */ 600,
   /* MORTO        */ 1000,
+  /* TONTO        */ 120,
+  /* LAPIDE       */ 1000,
   /* COCO         */ 150,
 };
 
@@ -82,6 +84,7 @@ static void quackDoEstado(Anim a) {
     case ANIM_PASSANDO_MAL: quack(QUACK_ENJOADO); break;
     case ANIM_TRISTE_FOME:  quack(QUACK_TRISTE); break;
     case ANIM_MORTO:        quack(QUACK_MORTE); break;
+    case ANIM_TONTO:        quack(QUACK_ENJOADO); break;
     default: break;
   }
 }
@@ -93,6 +96,7 @@ static Luz luzDoEstado(Anim a) {
     case ANIM_PENSANDO:     return LUZ_PENSANDO;
     case ANIM_COMENDO:      return LUZ_COMENDO;
     case ANIM_EMPOLGADO:    return LUZ_FESTA;
+    case ANIM_TONTO:        return LUZ_PENSANDO;
     case ANIM_PASSANDO_MAL: return LUZ_MAL;
     case ANIM_TRISTE_FOME:  return LUZ_FOME;
     default:                return LUZ_APAGADA;
@@ -106,6 +110,7 @@ static void vibraDoEstado(Anim a) {
     case ANIM_DEBOCHANDO:   vibra(VIBRA_CURTA); break;
     case ANIM_PASSANDO_MAL: vibra(VIBRA_ENJOO); break;
     case ANIM_MORTO:        vibra(VIBRA_MORTE); break;
+    case ANIM_TONTO:        vibra(VIBRA_ENJOO); break;
     default: break;
   }
 }
@@ -200,7 +205,12 @@ static void escreveCabecalhoWav(size_t n) {
   memcpy(p + 34, &bits, 2); memcpy(p + 36, "data", 4); memcpy(p + 40, &dados, 4);
 }
 
+// depois de gravar/cancelar, ignora os botões até o dedo sair da tela
+// (arrastar pra cancelar passava por cima do A/B e "clicava" neles)
+static bool travaToque = false;
+
 static void comecaGravacao() {
+  travaToque = true;
   M5.Speaker.end();  // no Core2, microfone e alto-falante não funcionam juntos
   M5.Mic.begin();
   gravadas = 0;
@@ -623,18 +633,14 @@ static void desenhaStatus() {
   // fome em 5 corações
   int cheios = hp < 0 ? 0 : (hp + 19) / 20;
   for (int i = 0; i < 5; i++) desenhaIcone(ICONE_CORACAO, 48 + i * 56, 52, 3, i >= cheios);  // vazio = contorno
-  // lápide com o número de mortes
-  int lx = SCREEN_W / 2, ly = 140;
-  canvas.fillRoundRect(lx - 30, ly - 34, 60, 70, 24, 0x9CD3);
-  canvas.fillRect(lx - 30, ly + 10, 60, 26, 0x9CD3);
-  canvas.drawRoundRect(lx - 30, ly - 34, 60, 70, 24, COR_TEXTO);
-  canvas.fillRect(lx - 40, ly + 34, 80, 6, 0x6A60);  // terra
-  canvas.setFont(&fonts::Font2);
-  canvas.setTextColor(COR_TEXTO);
-  canvas.setTextDatum(middle_center);
-  canvas.drawString("RIP", lx, ly - 14);
+  // lápide (sprite) com o número de mortes por cima
+  constexpr int LS = 3;  // 32px -> 96px
+  int lx = (SCREEN_W - 32 * LS) / 2, ly = 92;
+  desenhaSprite(ANIMS[ANIM_LAPIDE], 0, lx, ly, LS);
   canvas.setFont(&fonts::Font4);
-  canvas.drawString(String(mortes), lx, ly + 12);
+  canvas.setTextColor(TFT_WHITE);
+  canvas.setTextDatum(middle_center);
+  canvas.drawString(String(mortes), SCREEN_W / 2, ly + 15 * LS);
   canvas.setFont(&fonts::Font0);
 }
 
@@ -758,7 +764,7 @@ void loop() {
   bool mudou = false;
 
   // gravação: segura C (direita, como no WhatsApp) pra falar, solta pra enviar
-  if (tela == TELA_PATO && !gravando && !enviando && M5.BtnC.wasHold()) { comecaGravacao(); mudou = true; }
+  if (tela == TELA_PATO && !travaToque && !gravando && !enviando && M5.BtnC.wasHold()) { comecaGravacao(); mudou = true; }
   if (gravando) {
     continuaGravacao();
     // "segurando" = qualquer toque na tela, assim dá pra arrastar pra fora do B.
@@ -827,7 +833,9 @@ void loop() {
   // botões das telas internas
   // telaNoInicio: o mesmo aperto do A que volta pro pato não pode reabrir as tarefas
   Tela telaNoInicio = tela;
-  if (tela != TELA_PATO) {
+  if (travaToque && !gravando && M5.Touch.getCount() == 0) travaToque = false;
+  bool botoesLivres = !travaToque;
+  if (botoesLivres && tela != TELA_PATO) {
     if (M5.BtnA.wasPressed() || M5.BtnB.wasPressed() || M5.BtnC.wasPressed()) ultimoBotaoMs = agora;
     if (M5.BtnA.wasPressed() || agora - ultimoBotaoMs >= TELA_VOLTA_MS) {
       tela = TELA_PATO;
@@ -839,7 +847,7 @@ void loop() {
   }
 
   bool ocupado = gravando || enviando;
-  if (!ocupado && telaNoInicio == TELA_PATO) {
+  if (botoesLivres && !ocupado && telaNoInicio == TELA_PATO) {
     if (M5.BtnA.wasPressed()) { abreTela(TELA_TAREFAS); mudou = true; }
     if (M5.BtnB.wasPressed()) { abreTela(TELA_STATUS); mudou = true; }
 
@@ -909,6 +917,28 @@ void loop() {
   }
   if (gravando) mudou = true;  // atualiza o contador de segundos
   if (modoDebug && agora % 1000 < 15) mudou = true;  // painel atualiza ~1x por segundo
+
+  // chacoalhar = pato tonto (brincadeira). Só com o pato parado na tela principal e vivo.
+  // (com o pato morto, chacoalhar vai ser a massagem cardíaca)
+  {
+    static uint32_t ultimoPicoMs = 0;
+    static int picos = 0;
+    float ax, ay, az;
+    if (M5.Imu.getAccel(&ax, &ay, &az)) {
+      float g = sqrtf(ax * ax + ay * ay + az * az);
+      if (fabsf(g - 1.0f) > 1.2f && agora - ultimoPicoMs > 120) { picos++; ultimoPicoMs = agora; }
+      if (agora - ultimoPicoMs > 800) picos = 0;
+      if (picos >= 4) {
+        picos = 0;
+        if (tela == TELA_PATO && ocioso() && estado != ANIM_MORTO && estado != ANIM_TONTO) {
+          Serial.println("LOG chacoalhou: pato tonto");
+          mudaEstado(ANIM_TONTO);
+          fimReacaoMs = agora + 4000;
+          mudou = true;
+        }
+      }
+    }
+  }
 
   efeitosAtualiza(agora);
   if (mudou) desenhaCena();
