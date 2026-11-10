@@ -33,8 +33,10 @@ Barra de ícones embaixo da tela, um por botão:
 | Status | ← voltar | | |
 
 - **Toque no pato:** quack
-- **Chacoalhar:** pato vivo fica tonto; pato morto recebe massagem cardíaca (30 chacoalhadas a 100-120 por minuto, luz verde = no ritmo, laranja = quase, vermelha = recomeça)
-- **Pato morto + segurar C:** grava o pedido de desculpas (vai pro `/reviver.php`)
+- **Chacoalhar:** pato vivo fica tonto
+- **Pato morto:** a cada morte ele sorteia o que exige, e a tela avisa:
+  - *massagem cardíaca*: 30 chacoalhadas a 100-120 por minuto, com "Stayin' Alive" subindo o volume (luz verde = no ritmo, laranja = quase, vermelha = recomeça)
+  - *súplica*: segurar C e implorar (vai pro `/reviver.php` como `desculpa`)
 - **Segurar no pato 10 s:** liga/desliga o painel de debug (WiFi, IP, servidor, fome, hora, última gravação/resposta/erro, bateria)
 
 Sozinho: tela fica fraca depois de 1 min sem mexer, pato dorme entre 21h e 7h, cocôs = lembretes vencidos (vem do servidor), bateria piscando abaixo de 20%.

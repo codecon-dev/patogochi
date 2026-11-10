@@ -159,8 +159,8 @@ function desenhaExtrasPato() {
       ctx.fillStyle = COR_REC; ctx.fillRect(42, 44, (W - 84) * ui.batidas / MASSAGEM_BATIDAS, 6);
     } else {
       const pulo = Math.trunc(4 * Math.sin(performance.now() / 160));
-      desenhaIcone(icones.CORACAO, W / 2, 20 + pulo, 2);
-      texto('faça massagem cardíaca!', W / 2, 52, COR_TEXTO, 16, 'center');
+      desenhaIcone(ui.desculpa ? icones.MICROFONE : icones.CORACAO, W / 2, 20 + pulo, 2);
+      texto(ui.desculpa ? 'segure o microfone e implore!' : 'faça massagem cardíaca!', W / 2, 52, COR_TEXTO, 16, 'center');
     }
   }
   if (ui.bateriaFraca && Math.floor(performance.now() / 700) % 2) {
@@ -238,7 +238,7 @@ function desenha() {
 
 // linhas do firmware (enviaEspelho em main.cpp):
 //   PATO <anim> <frame> <cocos> <frameCoco> <comida> <revelando>
-//   UI <tela> <gravando> <decimos> <arraste> <mortes> <hp> <batidas> <bateriaFraca> <cursor> <carga> <base>
+//   UI <tela> <gravando> <decimos> <arraste> <mortes> <hp> <batidas> <bateriaFraca> <cursor> <carga> <base> <exigeDesculpa>
 //   LISTA <n>  seguido de n linhas  L <id> <feito> <vencido> <marcando> <prazo|-> <texto...>
 function processaLinha(linha) {
   linha = linha.replace(/\r$/, '');
@@ -252,7 +252,8 @@ function processaLinha(linha) {
     if (batidas !== batidasAntes && batidas > 0) ultimaBatida = performance.now();
     batidasAntes = batidas;
     ui = { tela: +p[1], gravando: p[2] === '1', decimos: +p[3], arraste: +p[4], mortes: +p[5], hp: +p[6],
-           batidas, bateriaFraca: p[8] === '1', cursor: +p[9], carga: +p[10], base: p[11] };
+           batidas, bateriaFraca: p[8] === '1', cursor: +p[9], carga: +p[10], base: p[11],
+           desculpa: p[12] === '1' };
     desenha();
   } else if (p[0] === 'LISTA') {
     listaFaltam = +p[1]; listaNova = [];

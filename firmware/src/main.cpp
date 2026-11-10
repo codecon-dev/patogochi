@@ -10,6 +10,7 @@
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
+#include <Preferences.h>
 #include "sprites.h"
 #include "sons.h"
 #if __has_include("sons_privados.h")
@@ -172,6 +173,25 @@ static void mudaEstado(Anim novo, bool comSom = true) {
 // ---------- estado do pato que vem do servidor (preenchido pela consulta de estado) ----------
 static Anim estadoBase = ANIM_PARADO;
 static int hp = -1, mortes = 0, versaoServidor = -1;
+
+// ---------- o que o pato exige pra reviver (sorteado a cada morte) ----------
+// Guardado na memória do Core2 junto com o número da morte: reiniciar não muda o sorteio.
+enum Exigencia { EXIGE_MASSAGEM, EXIGE_DESCULPA };
+static Exigencia exigencia = EXIGE_MASSAGEM;
+
+static void sorteiaExigencia(int numeroMorte) {
+  Preferences prefs;
+  prefs.begin("pato", false);
+  if (prefs.getInt("morte", -1) == numeroMorte) {
+    exigencia = (Exigencia)prefs.getUChar("exige", EXIGE_MASSAGEM);
+  } else {
+    exigencia = esp_random() % 2 ? EXIGE_DESCULPA : EXIGE_MASSAGEM;
+    prefs.putInt("morte", numeroMorte);
+    prefs.putUChar("exige", exigencia);
+  }
+  prefs.end();
+  Serial.printf("LOG morte %d: pato exige %s\n", numeroMorte, exigencia == EXIGE_DESCULPA ? "desculpa" : "massagem");
+}
 
 // ---------- gravação ----------
 static constexpr uint32_t TAXA_MIC = 16000;
@@ -849,7 +869,8 @@ static void desenhaPainelDebug() {
   int n = 0;
   bool wifiOk = WiFi.status() == WL_CONNECTED;
   linhas[n++] = "DEBUG  (segura no pato 10s pra fechar)";
-  linhas[n++] = "estado: " + String(ANIMS[estado].name) + "  base: " + String(ANIMS[estadoBase].name);
+  linhas[n++] = "estado: " + String(ANIMS[estado].name) + "  base: " + String(ANIMS[estadoBase].name) +
+                (estadoBase == ANIM_MORTO ? (exigencia == EXIGE_DESCULPA ? "  exige: desculpa" : "  exige: massagem") : "");
   linhas[n++] = "fome(hp): " + (hp >= 0 ? String(hp) : String("?")) + "  mortes: " + String(mortes) +
                 "  versao: " + String(versaoServidor) + "  consulta ha " +
                 (jaConsultou ? String((millis() - ultimaConsultaMs) / 1000) + "s" : String("-"));
@@ -888,14 +909,15 @@ static void desenhaExtrasPato() {
       canvas.drawRect(x0, y0, largura, 10, TFT_BLACK);
       canvas.fillRect(x0 + 2, y0 + 2, (largura - 4) * batidas / MASSAGEM_BATIDAS, 6, COR_REC);
     } else {
-      // dica: coração pulando + texto
+      // dica do que o pato exige: ícone pulando + texto
+      bool desculpa = exigencia == EXIGE_DESCULPA;
       int pulo = (int)(4 * sinf(millis() / 160.0f));
-      desenhaIcone(ICONE_CORACAO, SCREEN_W / 2, 20 + pulo, 2);
+      desenhaIcone(desculpa ? ICONE_MICROFONE : ICONE_CORACAO, SCREEN_W / 2, 20 + pulo, 2);
       canvas.setFont(&fonts::efontJA_16);
       canvas.setTextSize(1);
       canvas.setTextColor(COR_TEXTO);
       canvas.setTextDatum(middle_center);
-      canvas.drawString("faça massagem cardíaca!", SCREEN_W / 2, 52);
+      canvas.drawString(desculpa ? "segure o microfone e implore!" : "faça massagem cardíaca!", SCREEN_W / 2, 52);
       canvas.setFont(&fonts::Font0);
     }
   }
@@ -974,9 +996,9 @@ static void enviaEspelho() {
   int bateria = M5.Power.getBatteryLevel();
   bool bateriaFraca = bateria >= 0 && bateria <= 20 && !M5.Power.isCharging();
   // UI tela gravando decimos arraste mortes hp batidas bateriaFraca cursor carga base
-  Serial.printf("UI %d %d %d %d %d %d %d %d %d %d %s\n", (int)tela, gravando ? 1 : 0,
+  Serial.printf("UI %d %d %d %d %d %d %d %d %d %d %s %d\n", (int)tela, gravando ? 1 : 0,
                 (int)(gravadas * 10 / TAXA_MIC), arrasteX, mortes, hp, batidas, bateriaFraca ? 1 : 0,
-                cursorLembrete, (int)cargaLembretes, ANIMS[estadoBase].name);
+                cursorLembrete, (int)cargaLembretes, ANIMS[estadoBase].name, (int)exigencia);
   // lista de tarefas: no máximo 1x por segundo, só com a tela aberta
   static uint32_t ultimaListaMs = 0;
   if (tela == TELA_TAREFAS && millis() - ultimaListaMs > 1000) {
@@ -1057,7 +1079,12 @@ void loop() {
   bool mudou = false;
 
   // gravação: segura C (direita, como no WhatsApp) pra falar, solta pra enviar
-  if (tela == TELA_PATO && !travaToque && !gravando && !enviando && M5.BtnC.wasHold()) { comecaGravacao(); mudou = true; }
+  bool podeGravar = estadoBase != ANIM_MORTO || exigencia == EXIGE_DESCULPA;  // morto exigindo massagem: microfone mudo
+  if (tela == TELA_PATO && !travaToque && !gravando && !enviando && M5.BtnC.wasHold()) {
+    if (podeGravar) comecaGravacao();
+    else vibra(VIBRA_DUPLA);
+    mudou = true;
+  }
   if (gravando) {
     continuaGravacao();
     // "segurando" = qualquer toque na tela, assim dá pra arrastar pra fora do B.
@@ -1124,6 +1151,11 @@ void loop() {
     if (novosCocos != cocos) mudou = true;
     cocos = novosCocos > MAX_COCOS ? MAX_COCOS : novosCocos;
     bool mudouBase = novoBase != estadoBase;
+    static int morteSorteada = -1;
+    if (novoBase == ANIM_MORTO && morteSorteada != mortes) {
+      morteSorteada = mortes;
+      sorteiaExigencia(mortes);
+    }
     estadoBase = novoBase;
     if (mudouBase && ocioso()) {
       voltaProBase(true);  // com som: ex. entrou em triste_fome ou morreu
@@ -1240,7 +1272,7 @@ void loop() {
     if (M5.Imu.getAccel(&ax, &ay, &az)) {
       float desvio = fabsf(sqrtf(ax * ax + ay * ay + az * az) - 1.0f);
       bool morto = estadoBase == ANIM_MORTO;
-      if (morto && tela == TELA_PATO && !gravando && !enviando) {
+      if (morto && exigencia == EXIGE_MASSAGEM && tela == TELA_PATO && !gravando && !enviando) {
         if (desvio > MASSAGEM_LIMIAR_G && agora - ultimaBatidaMs > BATIDA_IGNORA_MS) {
           batidaMassagem(agora);
           mudou = true;
