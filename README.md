@@ -24,9 +24,16 @@ A porta do Core2 está em `firmware/platformio.ini` (`upload_port`). Pra achar a
 
 ## Botões
 
-- **C (direita) segurando:** grava uma ideia (solta pra enviar, arrasta o dedo pro lado pra cancelar)
+Barra de ícones embaixo da tela, um por botão:
+
+| Tela | A (esquerda) | B (meio) | C (direita) |
+|---|---|---|---|
+| Pato | 📋 tarefas | ❤️ status | 🎤 segura pra falar (solta envia, arrasta pro lado cancela) |
+| Tarefas | ← voltar | ↓ próxima | ✓ marca feita |
+| Status | ← voltar | | |
+
 - **Toque no pato:** quack
-- **Segurar no pato 10 s:** liga/desliga o painel de debug (WiFi, IP, servidor, última gravação/resposta/erro, bateria)
+- **Segurar no pato 10 s:** liga/desliga o painel de debug (WiFi, IP, servidor, fome, última gravação/resposta/erro, bateria)
 
 ## WiFi e servidor
 

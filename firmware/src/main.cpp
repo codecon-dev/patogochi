@@ -1,6 +1,8 @@
 // Patogochi — etapa 2: o pato te ouve.
 // Botões de toque embaixo da tela:
-//   C (direita) segurando = grava ideia (solta pra enviar, arrasta pro lado pra cancelar)
+// Barra de ícones embaixo, um por botão:
+//   A = tarefas · B = status · C segurando = grava ideia (solta envia, arrasta pro lado cancela)
+// Na tela de tarefas: A = voltar · B = próxima · C = marca feita. No status: A = voltar.
 // Toque no pato = quack. Segurar no pato 10 s = painel de debug.
 #include <M5Unified.h>
 #include <WiFi.h>
@@ -10,6 +12,7 @@
 #include "sprites.h"
 #include "sons.h"
 #include "efeitos.h"
+#include "icones.h"
 #if __has_include("config.h")
 #include "config.h"
 #else
@@ -21,10 +24,13 @@ static constexpr int SCREEN_W = 320;
 static constexpr int SCREEN_H = 240;
 static constexpr int DUCK_SCALE = 6;                         // 32px -> 192px
 static constexpr int DUCK_X = (SCREEN_W - 32 * DUCK_SCALE) / 2;
-static constexpr int GROUND_Y = 214;                         // linha do chão
+static constexpr int GROUND_Y = 196;                         // linha do chão (embaixo fica a barra de ícones)
 static constexpr int DUCK_Y = GROUND_Y - 32 * DUCK_SCALE + 6;
 static constexpr int COCO_SCALE = 3;
 static constexpr int MAX_COCOS = 4;
+static constexpr int BARRA_Y = 204;                          // barra de ícones, em cima dos botões A/B/C
+static constexpr int ICONE_ESCALA = 2;                       // 16px -> 32px
+static const int BOTAO_X[3] = {53, 160, 267};                // centro dos botões A, B, C
 
 // cores (RGB565)
 static constexpr uint16_t COR_FUNDO = 0x9E89;  // verde
@@ -385,8 +391,10 @@ static void tarefaEstado(void*) {
   vTaskDelete(nullptr);
 }
 
+static bool redeOcupadaTelas();
+
 static void consultaEstado() {
-  if (consultando || enviando || WiFi.status() != WL_CONNECTED) return;
+  if (consultando || enviando || redeOcupadaTelas() || WiFi.status() != WL_CONNECTED) return;
   consultando = true;
   ultimaConsultaMs = millis();
   jaConsultou = true;
@@ -403,6 +411,106 @@ static void voltaProBase(bool comSom) {
   mudaEstado(estadoBase, comSom);
 }
 
+// ---------- telas ----------
+enum Tela { TELA_PATO, TELA_TAREFAS, TELA_STATUS };
+static Tela tela = TELA_PATO;
+static constexpr uint32_t TELA_VOLTA_MS = 30000;  // sem mexer por 30 s, volta pro pato
+static uint32_t ultimoBotaoMs = 0;
+
+// lembretes (GET /lembretes.php) — endpoint pedido pro back-end
+static constexpr int MAX_LEMBRETES = 20;
+struct Lembrete { int id; String texto; String prazo; bool vencido; bool feito; };
+static Lembrete lembretes[MAX_LEMBRETES];
+static int qtdLembretes = 0;
+static int cursorLembrete = 0;
+enum CargaLembretes { CARGA_NADA, CARGA_CARREGANDO, CARGA_OK, CARGA_ERRO };
+static volatile CargaLembretes cargaLembretes = CARGA_NADA;
+static String erroLembretes;
+static volatile int marcandoId = 0;       // id sendo marcado como feito (0 = nenhum)
+static volatile int marcadoOkId = 0;      // id que o servidor confirmou
+
+static bool redeOcupadaTelas() { return cargaLembretes == CARGA_CARREGANDO || marcandoId; }
+
+// "2026-11-15T18:00:00-03:00" -> "15/11"
+static String diaMes(const char* iso) {
+  String s = iso ? iso : "";
+  return s.length() >= 10 ? s.substring(8, 10) + "/" + s.substring(5, 7) : "";
+}
+
+static void tarefaLembretes(void*) {
+  while (consultando || enviando) vTaskDelay(pdMS_TO_TICKS(50));  // uma conexão por vez
+  WiFiClientSecure seguro;  // antes do HTTPClient (ver tarefaEnvio)
+  HTTPClient http;
+  comecaHttp(http, seguro, "/lembretes.php");
+  http.addHeader("X-Api-Token", PATO_TOKEN);
+  http.setTimeout(10000);
+  int codigo = http.GET();
+  String corpo = codigo > 0 ? http.getString() : "";
+  http.end();
+  Serial.printf("LOG GET /lembretes.php -> %d %s\n", codigo, corpo.c_str());
+  JsonDocument doc;
+  if (codigo == 200 && !deserializeJson(doc, corpo)) {
+    int n = 0;
+    for (JsonObject l : doc["lembretes"].as<JsonArray>()) {
+      if (n >= MAX_LEMBRETES) break;
+      lembretes[n].id = l["id"] | 0;
+      lembretes[n].texto = l["texto"] | "";
+      lembretes[n].prazo = diaMes(l["vence_em"]);
+      lembretes[n].vencido = l["vencido"] | false;
+      lembretes[n].feito = false;
+      n++;
+    }
+    qtdLembretes = n;
+    cargaLembretes = CARGA_OK;
+  } else {
+    erroLembretes = codigo <= 0 ? String("servidor não respondeu") : "erro " + String(codigo);
+    cargaLembretes = CARGA_ERRO;
+  }
+  vTaskDelete(nullptr);
+}
+
+static void carregaLembretes() {
+  if (WiFi.status() != WL_CONNECTED) {
+    erroLembretes = "sem wifi";
+    cargaLembretes = CARGA_ERRO;
+    return;
+  }
+  cargaLembretes = CARGA_CARREGANDO;
+  qtdLembretes = 0;
+  cursorLembrete = 0;
+  xTaskCreatePinnedToCore(tarefaLembretes, "lembretes", 12288, nullptr, 1, nullptr, 0);
+}
+
+static void tarefaMarcaFeito(void*) {
+  while (consultando || enviando) vTaskDelay(pdMS_TO_TICKS(50));  // uma conexão por vez
+  int id = marcandoId;
+  WiFiClientSecure seguro;
+  HTTPClient http;
+  comecaHttp(http, seguro, "/marcar-feito.php");
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("X-Api-Token", PATO_TOKEN);
+  http.setTimeout(10000);
+  int codigo = http.POST(String("{\"lembrete_id\":") + id + "}");
+  String corpo = codigo > 0 ? http.getString() : "";
+  http.end();
+  Serial.printf("LOG POST /marcar-feito.php %d -> %d %s\n", id, codigo, corpo.c_str());
+  if (codigo == 200) marcadoOkId = id;
+  marcandoId = 0;
+  vTaskDelete(nullptr);
+}
+
+static void marcaFeito(int i) {
+  if (i < 0 || i >= qtdLembretes || lembretes[i].feito || marcandoId) return;
+  marcandoId = lembretes[i].id;
+  xTaskCreatePinnedToCore(tarefaMarcaFeito, "feito", 12288, nullptr, 1, nullptr, 0);
+}
+
+static void abreTela(Tela t) {
+  tela = t;
+  ultimoBotaoMs = millis();
+  if (t == TELA_TAREFAS) carregaLembretes();
+}
+
 // ---------- desenho ----------
 // Desenha um frame ampliado, pulando os pixels transparentes.
 static void desenhaSprite(const Sprite& s, uint16_t f, int x, int y, int escala) {
@@ -414,6 +522,131 @@ static void desenhaSprite(const Sprite& s, uint16_t f, int x, int y, int escala)
       canvas.fillRect(x + i * escala, y + j * escala, escala, escala, c);
     }
   }
+}
+
+static uint16_t corDoIcone(char c, bool apagado) {
+  uint16_t cor;
+  switch (c) {
+    case 'k': cor = 0x2104; break;   // contorno
+    case 'w': cor = TFT_WHITE; break;
+    case 'g': cor = 0xAD55; break;   // cinza
+    case 'b': cor = 0x9A60; break;   // marrom (prancheta)
+    case 'y': cor = 0xFEA0; break;   // amarelo (clipe)
+    case 'r': cor = 0xE8E4; break;   // vermelho (coração)
+    case 's': cor = 0x8C71; break;   // cinza metal (microfone)
+    default:  return SPRITE_TRANSPARENT;
+  }
+  return apagado && c != 'k' ? 0x7BEF : cor;  // apagado = coração vazio
+}
+
+static void desenhaIcone(const char* const* icone, int cx, int cy, int escala, bool apagado = false) {
+  int x0 = cx - 8 * escala, y0 = cy - 8 * escala;
+  for (int j = 0; j < 16; j++)
+    for (int i = 0; i < 16; i++) {
+      uint16_t c = corDoIcone(icone[j][i], apagado);
+      if (c != SPRITE_TRANSPARENT) canvas.fillRect(x0 + i * escala, y0 + j * escala, escala, escala, c);
+    }
+}
+
+// setas e check desenhados com primitivas (barra das telas internas)
+static void desenhaVoltar(int cx, int cy) {
+  canvas.fillTriangle(cx - 12, cy, cx - 2, cy - 10, cx - 2, cy + 10, COR_TEXTO);
+  canvas.fillRect(cx - 3, cy - 4, 15, 8, COR_TEXTO);
+}
+static void desenhaSetaBaixo(int cx, int cy) {
+  canvas.fillTriangle(cx, cy + 12, cx - 10, cy + 2, cx + 10, cy + 2, COR_TEXTO);
+  canvas.fillRect(cx - 4, cy - 12, 8, 15, COR_TEXTO);
+}
+static void desenhaCheck(int cx, int cy, uint16_t cor) {
+  for (int d = -2; d <= 2; d++) {
+    canvas.drawLine(cx - 11, cy + d, cx - 4, cy + 7 + d, cor);
+    canvas.drawLine(cx - 4, cy + 7 + d, cx + 11, cy - 8 + d, cor);
+  }
+}
+
+static void desenhaBarra() {
+  int cy = BARRA_Y + 18;
+  if (tela == TELA_PATO) {
+    desenhaIcone(ICONE_TAREFAS, BOTAO_X[0], cy, ICONE_ESCALA);
+    desenhaIcone(ICONE_CORACAO, BOTAO_X[1], cy, ICONE_ESCALA);
+    desenhaIcone(ICONE_MICROFONE, BOTAO_X[2], cy, ICONE_ESCALA);
+  } else {
+    desenhaVoltar(BOTAO_X[0], cy);
+    if (tela == TELA_TAREFAS && qtdLembretes > 0) {
+      desenhaSetaBaixo(BOTAO_X[1], cy);
+      desenhaCheck(BOTAO_X[2], cy, COR_TEXTO);
+    }
+  }
+}
+
+static void desenhaTarefas() {
+  canvas.setFont(&fonts::efontJA_16);
+  canvas.setTextSize(1);
+  canvas.setTextColor(COR_TEXTO);
+  canvas.setTextDatum(middle_left);
+  if (cargaLembretes == CARGA_CARREGANDO) {
+    canvas.setTextDatum(middle_center);
+    canvas.drawString("carregando...", SCREEN_W / 2, 100);
+  } else if (cargaLembretes == CARGA_ERRO) {
+    canvas.setTextDatum(middle_center);
+    canvas.drawString(erroLembretes, SCREEN_W / 2, 100);
+  } else if (qtdLembretes == 0) {
+    canvas.setTextDatum(middle_center);
+    canvas.drawString("nenhuma tarefa \\o/", SCREEN_W / 2, 100);
+  } else {
+    // janela de até 6 linhas acompanhando o cursor
+    constexpr int VISIVEIS = 6, ALT = 32, Y0 = 8;
+    int primeiro = cursorLembrete - VISIVEIS + 1;
+    if (primeiro < 0) primeiro = 0;
+    for (int k = 0; k < VISIVEIS && primeiro + k < qtdLembretes; k++) {
+      int i = primeiro + k;
+      int y = Y0 + k * ALT;
+      const Lembrete& l = lembretes[i];
+      if (i == cursorLembrete) canvas.fillRoundRect(4, y, SCREEN_W - 8, ALT - 4, 6, TFT_WHITE);
+      // checkbox
+      int bx = 12, by = y + 4;
+      canvas.drawRect(bx, by, 20, 20, COR_TEXTO);
+      canvas.drawRect(bx + 1, by + 1, 18, 18, COR_TEXTO);
+      bool marcando = marcandoId == l.id;
+      if (l.feito) desenhaCheck(bx + 10, by + 9, 0x05E0);
+      else if (marcando && (millis() / 250) % 2) canvas.fillRect(bx + 5, by + 5, 10, 10, 0xAD55);
+      // texto (cortado pra caber) + prazo
+      String prazo = l.prazo;
+      int largPrazo = prazo.length() ? canvas.textWidth(prazo) + 8 : 0;
+      String t = l.texto;
+      while (t.length() > 1 && canvas.textWidth(t) > SCREEN_W - 50 - largPrazo) t.remove(t.length() - 1);
+      if (t.length() < l.texto.length()) t += "…";
+      canvas.setTextColor(l.feito ? 0x7BEF : COR_TEXTO);
+      canvas.drawString(t, 40, y + 14);
+      if (prazo.length()) {
+        canvas.setTextDatum(middle_right);
+        canvas.setTextColor(l.vencido && !l.feito ? 0xC800 : COR_TEXTO);  // vencido = vermelho
+        canvas.drawString(prazo, SCREEN_W - 12, y + 14);
+        canvas.setTextDatum(middle_left);
+      }
+      if (l.feito) canvas.drawFastHLine(40, y + 14, canvas.textWidth(t), 0x7BEF);
+    }
+  }
+  canvas.setFont(&fonts::Font0);
+}
+
+static void desenhaStatus() {
+  // fome em 5 corações
+  int cheios = hp < 0 ? 0 : (hp + 19) / 20;
+  for (int i = 0; i < 5; i++) desenhaIcone(ICONE_CORACAO, 48 + i * 56, 52, 3, i >= cheios);
+  // lápide com o número de mortes
+  int lx = SCREEN_W / 2, ly = 140;
+  canvas.fillRoundRect(lx - 30, ly - 34, 60, 70, 24, 0x9CD3);
+  canvas.fillRect(lx - 30, ly + 10, 60, 26, 0x9CD3);
+  canvas.drawRoundRect(lx - 30, ly - 34, 60, 70, 24, COR_TEXTO);
+  canvas.fillRect(lx - 40, ly + 34, 80, 6, 0x6A60);  // terra
+  canvas.setFont(&fonts::Font2);
+  canvas.setTextColor(COR_TEXTO);
+  canvas.setTextDatum(middle_center);
+  canvas.drawString("RIP", lx, ly - 14);
+  canvas.setFont(&fonts::Font4);
+  canvas.drawString(String(mortes), lx, ly + 12);
+  canvas.setFont(&fonts::Font0);
 }
 
 static void desenhaPainelDebug() {
@@ -455,12 +688,19 @@ static void desenhaCena() {
     return;
   }
 
-  desenhaSprite(ANIMS[estado], frame, DUCK_X, DUCK_Y, DUCK_SCALE);
+  if (tela == TELA_TAREFAS) {
+    desenhaTarefas();
+  } else if (tela == TELA_STATUS) {
+    desenhaStatus();
+  } else {
+    desenhaSprite(ANIMS[estado], frame, DUCK_X, DUCK_Y, DUCK_SCALE);
+  }
+  if (!gravando) desenhaBarra();
 
   // cocôs alinhados no chão, alternando lados do pato
   const Sprite& coco = ANIMS[ANIM_COCO];
   static const int cocoX[MAX_COCOS] = {12, SCREEN_W - 12 - 13 * COCO_SCALE, 60, SCREEN_W - 60 - 13 * COCO_SCALE};
-  for (int i = 0; i < cocos; i++) {
+  for (int i = 0; tela == TELA_PATO && i < cocos; i++) {
     desenhaSprite(coco, (frameCoco + i * 3) % coco.frames, cocoX[i],
                   GROUND_Y - coco.h * COCO_SCALE + 4, COCO_SCALE);
   }
@@ -524,7 +764,7 @@ void loop() {
   bool mudou = false;
 
   // gravação: segura C (direita, como no WhatsApp) pra falar, solta pra enviar
-  if (!gravando && !enviando && M5.BtnC.wasHold()) { comecaGravacao(); mudou = true; }
+  if (tela == TELA_PATO && !gravando && !enviando && M5.BtnC.wasHold()) { comecaGravacao(); mudou = true; }
   if (gravando) {
     continuaGravacao();
     // "segurando" = qualquer toque na tela, assim dá pra arrastar pra fora do B.
@@ -577,8 +817,36 @@ void loop() {
     }
   }
 
+  // resultados de rede das telas
+  if (marcadoOkId) {
+    for (int i = 0; i < qtdLembretes; i++) if (lembretes[i].id == marcadoOkId) lembretes[i].feito = true;
+    marcadoOkId = 0;
+    vibra(VIBRA_CURTA);
+    quack(QUACK_FELIZ);
+    consultaEstado();  // cocô some no servidor
+    mudou = true;
+  }
+  static CargaLembretes cargaAnterior = CARGA_NADA;
+  if (cargaLembretes != cargaAnterior) { cargaAnterior = cargaLembretes; mudou = true; }
+  if (marcandoId) mudou = true;  // checkbox piscando
+
+  // botões das telas internas
+  if (tela != TELA_PATO) {
+    if (M5.BtnA.wasPressed() || M5.BtnB.wasPressed() || M5.BtnC.wasPressed()) ultimoBotaoMs = agora;
+    if (M5.BtnA.wasPressed() || agora - ultimoBotaoMs >= TELA_VOLTA_MS) {
+      tela = TELA_PATO;
+      mudou = true;
+    } else if (tela == TELA_TAREFAS && qtdLembretes > 0) {
+      if (M5.BtnB.wasPressed()) { cursorLembrete = (cursorLembrete + 1) % qtdLembretes; mudou = true; }
+      if (M5.BtnC.wasPressed()) { marcaFeito(cursorLembrete); mudou = true; }
+    }
+  }
+
   bool ocupado = gravando || enviando;
-  if (!ocupado) {
+  if (!ocupado && tela == TELA_PATO) {
+    if (M5.BtnA.wasPressed()) { abreTela(TELA_TAREFAS); mudou = true; }
+    if (M5.BtnB.wasPressed()) { abreTela(TELA_STATUS); mudou = true; }
+
     auto toque = M5.Touch.getDetail();
 
     // segurar em cima do pato por 10 s liga/desliga o painel de debug
