@@ -6,7 +6,6 @@
 #define WIFI_SSID "nome-da-rede"
 #define WIFI_PASS "senha-da-rede"
 
-// Endereço do servidor, sem barra no final.
-// Mock no Mac: http://<IP do Mac>:8080  (IP: ipconfig getifaddr en0)
-#define SERVIDOR_URL "http://192.168.1.8:8080"
-#define PATO_TOKEN "troque-isso"
+// Endereço do back-end PHP, sem barra no final (http:// ou https://)
+#define SERVIDOR_URL "https://exemplo.com"
+#define PATO_TOKEN "token-do-backend"

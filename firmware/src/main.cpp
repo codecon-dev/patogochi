@@ -6,6 +6,7 @@
 #include <M5Unified.h>
 #include <WiFi.h>
 #include <HTTPClient.h>
+#include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
 #include "sprites.h"
 #include "sons.h"
@@ -143,6 +144,11 @@ static constexpr uint32_t TAXA_MIC = 16000;
 static constexpr size_t MAX_AMOSTRAS = TAXA_MIC * 10;      // 10 s
 static constexpr size_t BLOCO = 1024;                      // amostras por pedaço gravado
 static constexpr size_t MIN_AMOSTRAS = TAXA_MIC / 2;       // menos de 0,5 s = ignora
+// O áudio sobe como multipart/form-data: o buffer tem folga antes e depois do WAV
+// pra montar o corpo inteiro sem copiar as amostras.
+static const char* LIMITE = "----patogochiQuackQuack";
+static constexpr size_t FOLGA = 256;
+static uint8_t* buffer = nullptr;                          // FOLGA + WAV + FOLGA
 static uint8_t* wav = nullptr;                             // cabeçalho (44 bytes) + amostras
 static int16_t* amostras = nullptr;
 static size_t gravadas = 0;
@@ -184,11 +190,12 @@ static bool terminaGravacao() {
 }
 
 // ---------- envio pro servidor (roda numa tarefa separada pra animação não travar) ----------
+// API: https://patogochi.codegus.com/docs.html
 struct Resposta {
   bool ok = false;
-  String texto, opiniao, erro;
+  String opiniao, prazo, erro;
   int comida = -1;                 // índice em FOODS, -1 = nenhuma
-  Anim reacao = ANIM_DEBOCHANDO;
+  Anim reacao = ANIM_EMPOLGADO;
 };
 static Resposta resposta;
 static volatile bool enviando = false;
@@ -206,34 +213,84 @@ static Anim animPorNome(const char* nome, Anim padrao) {
   return padrao;
 }
 
+static void comecaHttp(HTTPClient& http, WiFiClientSecure& seguro, const String& caminho) {
+  String url = String(SERVIDOR_URL) + caminho;
+  if (url.startsWith("https://")) {
+    seguro.setInsecure();  // não confere o certificado (simples; dá pra fixar o certificado depois)
+    http.begin(seguro, url);
+  } else {
+    http.begin(url);
+  }
+}
+
+// Monta o corpo multipart em volta do WAV. Devolve início e tamanho.
+static uint8_t* montaMultipart(size_t& tamanho) {
+  char antes[FOLGA], depois[64];
+  int nAntes = snprintf(antes, sizeof(antes),
+      "--%s\r\nContent-Disposition: form-data; name=\"origem\"\r\n\r\ncore2\r\n"
+      "--%s\r\nContent-Disposition: form-data; name=\"audio\"; filename=\"ideia.wav\"\r\n"
+      "Content-Type: audio/wav\r\n\r\n", LIMITE, LIMITE);
+  int nDepois = snprintf(depois, sizeof(depois), "\r\n--%s--\r\n", LIMITE);
+  size_t nWav = 44 + gravadas * 2;
+  uint8_t* inicio = wav - nAntes;
+  memcpy(inicio, antes, nAntes);
+  memcpy(wav + nWav, depois, nDepois);
+  tamanho = nAntes + nWav + nDepois;
+  return inicio;
+}
+
+// "2026-11-15T18:00:00-03:00" -> "15/11 18:00"
+static String formataPrazo(const String& iso) {
+  if (iso.length() < 16) return iso;
+  return iso.substring(8, 10) + "/" + iso.substring(5, 7) + " " + iso.substring(11, 16);
+}
+
 static void tarefaEnvio(void*) {
   Resposta r;
   if (WiFi.status() != WL_CONNECTED) {
     r.erro = "Sem WiFi :(";
   } else {
+    // 1. manda a ideia
     HTTPClient http;
-    http.begin(String(SERVIDOR_URL) + "/ideia");
-    http.addHeader("Content-Type", "audio/wav");
-    http.addHeader("X-Pato-Token", PATO_TOKEN);
-    http.setTimeout(30000);
-    int codigo = http.POST(wav, 44 + gravadas * 2);
+    WiFiClientSecure seguro;
+    comecaHttp(http, seguro, "/ideia.php");
+    http.addHeader("Content-Type", String("multipart/form-data; boundary=") + LIMITE);
+    http.addHeader("X-Api-Token", PATO_TOKEN);
+    http.setTimeout(45000);  // transcrição + Claude podem demorar
+    size_t tamanho;
+    uint8_t* corpoEnvio = montaMultipart(tamanho);
+    int codigo = http.POST(corpoEnvio, tamanho);
     String corpo = codigo > 0 ? http.getString() : "";
     http.end();
-    Serial.printf("LOG POST /ideia -> %d %s\n", codigo, corpo.c_str());
+    Serial.printf("LOG POST /ideia.php -> %d %s\n", codigo, corpo.c_str());
 
     JsonDocument doc;
     bool jsonOk = !deserializeJson(doc, corpo);
     if (codigo == 200 && jsonOk) {
       r.ok = true;
-      r.texto = doc["texto"] | "";
-      r.opiniao = doc["opiniao"] | "";
-      r.comida = indiceComida(doc["comida"]);
-      r.reacao = animPorNome(doc["reacao"], ANIM_DEBOCHANDO);
+      r.comida = indiceComida(doc["tipo"]);
+      r.reacao = animPorNome(doc["estado"], ANIM_EMPOLGADO);
+      if (doc["prazo"].is<const char*>()) r.prazo = formataPrazo(doc["prazo"].as<const char*>());
+
+      // 2. a opinião não vem na resposta: busca no estado
+      HTTPClient httpEstado;
+      WiFiClientSecure seguroEstado;
+      comecaHttp(httpEstado, seguroEstado, "/estado.php");
+      httpEstado.setTimeout(10000);
+      if (httpEstado.GET() == 200) {
+        JsonDocument estadoDoc;
+        if (!deserializeJson(estadoDoc, httpEstado.getString())) {
+          r.opiniao = estadoDoc["ultima_opiniao"] | "";
+        }
+      }
+      httpEstado.end();
+    } else if (codigo == 409) {
+      r.erro = "Tô morto. Me revive primeiro.";
     } else if (codigo <= 0) {
       r.erro = "Servidor não respondeu";
     } else {
-      r.erro = jsonOk && doc["erro"].is<const char*>() ? String(doc["erro"].as<const char*>())
-                                                       : "Erro " + String(codigo);
+      r.erro = jsonOk && doc["error"].is<const char*>() ? String(doc["error"].as<const char*>())
+                                                        : "Erro " + String(codigo);
     }
   }
   resposta = r;
@@ -247,7 +304,7 @@ static void enviaIdeia() {
   enviando = true;
   respostaPronta = false;
   mudaEstado(ANIM_PENSANDO, false);
-  xTaskCreatePinnedToCore(tarefaEnvio, "envio", 12288, nullptr, 1, nullptr, 0);
+  xTaskCreatePinnedToCore(tarefaEnvio, "envio", 16384, nullptr, 1, nullptr, 0);
 }
 
 static void trataResposta() {
@@ -258,7 +315,9 @@ static void trataResposta() {
     fimReacaoMs = millis() + REACAO_MS;
     return;
   }
-  mostraBalao(resposta.opiniao.length() ? resposta.opiniao : resposta.texto);
+  String fala = resposta.opiniao;
+  if (resposta.prazo.length()) fala += (fala.length() ? " " : "") + String("Lembrete: ") + resposta.prazo;
+  if (fala.length()) mostraBalao(fala);
   if (resposta.comida >= 0) {
     comida = (Food)resposta.comida;
     comendoIdeia = true;
@@ -395,7 +454,8 @@ void setup() {
   canvas.createSprite(SCREEN_W, SCREEN_H);
   M5.Speaker.setVolume(160);
 
-  wav = (uint8_t*)ps_malloc(44 + MAX_AMOSTRAS * 2);
+  buffer = (uint8_t*)ps_malloc(FOLGA + 44 + MAX_AMOSTRAS * 2 + FOLGA);
+  wav = buffer + FOLGA;
   amostras = (int16_t*)(wav + 44);
 
   WiFi.mode(WIFI_STA);
