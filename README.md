@@ -13,6 +13,7 @@ Tamagotchi de pato no M5Stack Core2 que se alimenta de ideias. Plano completo em
 ```sh
 brew install platformio ffmpeg
 python3 tools/gen_sprites.py          # só se mudar algum PNG
+python3 tools/gen_sons.py             # só se mudar algum WAV em assets/sons
 cd firmware
 pio run                               # compila
 pio run -t upload                     # compila e grava no Core2 (cabo USB-C)
@@ -22,7 +23,7 @@ A porta do Core2 está em `firmware/platformio.ini` (`upload_port`). Pra achar a
 
 ## Botões (modo debug)
 
-A = estado anterior · B = põe/tira cocô · C = próximo estado
+A = estado anterior · B = põe/tira cocô · C = próximo estado · toque no pato = quack
 
 ## Espelho da tela no Mac
 

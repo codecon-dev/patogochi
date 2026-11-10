@@ -1,8 +1,10 @@
 // Patogochi — etapa 1: pato vivo na tela.
 // Botões de toque embaixo da tela (modo debug):
 //   A = estado anterior · B = põe/tira cocô · C = próximo estado
+// Toque no pato = quack.
 #include <M5Unified.h>
 #include "sprites.h"
+#include "sons.h"
 
 // ---------- layout ----------
 static constexpr int SCREEN_W = 320;
@@ -34,6 +36,38 @@ static const uint16_t FRAME_MS[ANIM_COUNT] = {
 };
 
 static M5Canvas canvas(&M5.Display);
+
+// ---------- quack ----------
+// Mesmo som em velocidades diferentes: mais rápido = agudo/feliz, mais lento = grave/triste.
+enum Quack { QUACK_NORMAL, QUACK_FELIZ, QUACK_TRISTE, QUACK_MORTE };
+
+static void quack(Quack tipo) {
+  uint32_t taxa = SOM_SAMPLE_RATE;
+  uint32_t vezes = 1;
+  switch (tipo) {
+    case QUACK_NORMAL: break;
+    case QUACK_FELIZ:  taxa = SOM_SAMPLE_RATE * 5 / 4; vezes = 2; break;  // agudo, duas vezes
+    case QUACK_TRISTE: taxa = SOM_SAMPLE_RATE * 2 / 3; break;             // grave e arrastado
+    case QUACK_MORTE:  taxa = SOM_SAMPLE_RATE / 2; break;                 // bem lento
+  }
+  M5.Speaker.playRaw(SOM_QUACK, SOM_QUACK_LEN, taxa, false, vezes, -1, true);
+}
+
+// som automático ao entrar em cada estado
+static void quackDoEstado(Anim a) {
+  switch (a) {
+    case ANIM_EMPOLGADO:    quack(QUACK_FELIZ); break;
+    case ANIM_DEBOCHANDO:   quack(QUACK_NORMAL); break;
+    case ANIM_TRISTE_FOME:
+    case ANIM_PASSANDO_MAL: quack(QUACK_TRISTE); break;
+    case ANIM_MORTO:        quack(QUACK_MORTE); break;
+    default: break;
+  }
+}
+
+static bool tocouNoPato(int x, int y) {
+  return x >= DUCK_X && x < DUCK_X + 32 * DUCK_SCALE && y >= DUCK_Y && y < DUCK_Y + 32 * DUCK_SCALE;
+}
 
 static Anim estado = ANIM_PARADO;
 static uint16_t frame = 0;
@@ -114,6 +148,7 @@ static void trocaEstado(int delta) {
   ultimoFrameMs = millis();
   revelandoComida = false;
   if (estado == ANIM_COMENDO) comecaRevelacao();
+  quackDoEstado(estado);
 }
 
 void setup() {
@@ -122,6 +157,7 @@ void setup() {
   canvas.setPsram(true);
   canvas.setColorDepth(16);
   canvas.createSprite(SCREEN_W, SCREEN_H);
+  M5.Speaker.setVolume(160);
   desenhaCena();
 }
 
@@ -133,6 +169,13 @@ void loop() {
   if (M5.BtnA.wasPressed()) { trocaEstado(-1); mudou = true; }
   if (M5.BtnC.wasPressed()) { trocaEstado(+1); mudou = true; }
   if (M5.BtnB.wasPressed()) { cocos = (cocos + 1) % (MAX_COCOS + 1); mudou = true; }
+
+  auto toque = M5.Touch.getDetail();
+  if (toque.wasPressed() && !revelandoComida && tocouNoPato(toque.x, toque.y)) {
+    quack(estado == ANIM_EMPOLGADO ? QUACK_FELIZ
+          : (estado == ANIM_TRISTE_FOME || estado == ANIM_PASSANDO_MAL) ? QUACK_TRISTE
+          : estado == ANIM_MORTO ? QUACK_MORTE : QUACK_NORMAL);
+  }
 
   if (revelandoComida) {
     if (agora - inicioRevelaMs >= REVELA_MS) {
