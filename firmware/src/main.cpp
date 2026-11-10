@@ -540,8 +540,7 @@ static void desenhaIcone(const char* const* icone, int cx, int cy, int escala, b
 
 // setas e check desenhados com primitivas (barra das telas internas)
 static void desenhaVoltar(int cx, int cy) {
-  canvas.fillTriangle(cx - 10, cy, cx - 2, cy - 8, cx - 2, cy + 8, TFT_BLACK);
-  canvas.fillRect(cx - 3, cy - 3, 13, 6, TFT_BLACK);
+  desenhaIcone(ICONE_VOLTAR, cx, cy, ICONE_ESCALA);
 }
 static void desenhaSetaBaixo(int cx, int cy) {
   canvas.fillTriangle(cx, cy + 10, cx - 8, cy + 2, cx + 8, cy + 2, TFT_BLACK);
@@ -821,6 +820,8 @@ void loop() {
   if (marcandoId) mudou = true;  // checkbox piscando
 
   // botões das telas internas
+  // telaNoInicio: o mesmo aperto do A que volta pro pato não pode reabrir as tarefas
+  Tela telaNoInicio = tela;
   if (tela != TELA_PATO) {
     if (M5.BtnA.wasPressed() || M5.BtnB.wasPressed() || M5.BtnC.wasPressed()) ultimoBotaoMs = agora;
     if (M5.BtnA.wasPressed() || agora - ultimoBotaoMs >= TELA_VOLTA_MS) {
@@ -833,7 +834,7 @@ void loop() {
   }
 
   bool ocupado = gravando || enviando;
-  if (!ocupado && tela == TELA_PATO) {
+  if (!ocupado && telaNoInicio == TELA_PATO) {
     if (M5.BtnA.wasPressed()) { abreTela(TELA_TAREFAS); mudou = true; }
     if (M5.BtnB.wasPressed()) { abreTela(TELA_STATUS); mudou = true; }
 

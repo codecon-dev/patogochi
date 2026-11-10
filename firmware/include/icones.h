@@ -49,3 +49,19 @@ static const char* ICONE_MICROFONE[ICONE_TAM] = {
   ".....kk.....",
   "...kkkkkk...",
 };
+
+// "<" de voltar
+static const char* ICONE_VOLTAR[ICONE_TAM] = {
+  "............",
+  ".......kk...",
+  "......kk....",
+  ".....kk.....",
+  "....kk......",
+  "...kk.......",
+  "...kk.......",
+  "....kk......",
+  ".....kk.....",
+  "......kk....",
+  ".......kk...",
+  "............",
+};
