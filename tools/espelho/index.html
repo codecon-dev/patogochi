@@ -110,6 +110,9 @@ async function conectar() {
   try {
     porta = await navigator.serial.requestPort();
     await porta.open({ baudRate: 115200 });
+    // O Chrome liga DTR/RTS ao abrir a porta, e no Core2 esses fios seguram o ESP32 em reset.
+    // Desliga os dois pra ele voltar a rodar.
+    await porta.setSignals({ dataTerminalReady: false, requestToSend: false });
   } catch (e) {
     statusEl.textContent = 'não conectou: ' + e.message + ' (feche o pio monitor se estiver aberto)';
     return;
