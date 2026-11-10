@@ -10,6 +10,7 @@
 #include <ArduinoJson.h>
 #include "sprites.h"
 #include "sons.h"
+#include "efeitos.h"
 #if __has_include("config.h")
 #include "config.h"
 #else
@@ -80,6 +81,34 @@ static void quackDoEstado(Anim a) {
   }
 }
 
+// luz de cada estado
+static Luz luzDoEstado(Anim a) {
+  switch (a) {
+    case ANIM_OUVINDO:      return LUZ_REC;
+    case ANIM_PENSANDO:     return LUZ_PENSANDO;
+    case ANIM_COMENDO:      return LUZ_COMENDO;
+    case ANIM_EMPOLGADO:    return LUZ_FESTA;
+    case ANIM_PASSANDO_MAL: return LUZ_MAL;
+    case ANIM_TRISTE_FOME:  return LUZ_FOME;
+    default:                return LUZ_APAGADA;
+  }
+}
+
+// vibração ao entrar em cada estado
+static void vibraDoEstado(Anim a) {
+  switch (a) {
+    case ANIM_EMPOLGADO:    vibra(VIBRA_FESTA); break;
+    case ANIM_DEBOCHANDO:   vibra(VIBRA_CURTA); break;
+    case ANIM_PASSANDO_MAL: vibra(VIBRA_ENJOO); break;
+    case ANIM_MORTO:        vibra(VIBRA_MORTE); break;
+    default: break;
+  }
+}
+
+static void sinalCancelou() {
+  vibra(VIBRA_DUPLA);
+}
+
 static bool tocouNoPato(int x, int y) {
   return x >= DUCK_X && x < DUCK_X + 32 * DUCK_SCALE && y >= DUCK_Y && y < DUCK_Y + 32 * DUCK_SCALE;
 }
@@ -118,7 +147,11 @@ static void mudaEstado(Anim novo, bool comSom = true) {
   ultimoFrameMs = millis();
   revelandoComida = false;
   if (estado == ANIM_COMENDO) comecaRevelacao();
-  if (comSom) quackDoEstado(estado);
+  luz(luzDoEstado(estado));
+  if (comSom) {
+    quackDoEstado(estado);
+    vibraDoEstado(estado);
+  }
 }
 
 // ---------- gravação ----------
@@ -139,6 +172,9 @@ static String ultimoErro;  // só pro rótulo de debug e pro log serial
 static uint32_t inicioGravacaoMs = 0;
 static constexpr uint32_t SOLTO_MS = 300;
 static uint32_t soltoDesdeMs = 0;
+static constexpr int ARRASTE_CANCELA = 100;   // px pro lado = cancela (igual WhatsApp)
+static int xInicioToque = -1;
+static int arrasteX = 0;                      // deslocamento atual, pra animar a bolinha
 
 static void escreveCabecalhoWav(size_t n) {
   uint32_t dados = n * 2, taxaBytes = TAXA_MIC * 2, tamanho = 36 + dados, fmt = 16;
@@ -157,8 +193,11 @@ static void comecaGravacao() {
   gravando = true;
   inicioGravacaoMs = millis();
   soltoDesdeMs = 0;
+  xInicioToque = -1;
+  arrasteX = 0;
   ultimoErro = "";
   mudaEstado(ANIM_OUVINDO, false);
+  vibra(VIBRA_CURTA);
 }
 
 static void continuaGravacao() {
@@ -333,7 +372,15 @@ static void desenhaCena() {
 
   if (gravando) {
     // bolinha vermelha piscando + segundos gravados
-    if ((millis() / 400) % 2) canvas.fillCircle(SCREEN_W - 20, 16, 7, COR_REC);
+    // bolinha acompanha o arraste; perto de cancelar vira um X
+    int bx = SCREEN_W - 20 + arrasteX / 2;
+    if (bx > SCREEN_W - 10) bx = SCREEN_W - 10;
+    if (abs(arrasteX) > ARRASTE_CANCELA / 2) {
+      canvas.drawLine(bx - 7, 9, bx + 7, 23, COR_REC);
+      canvas.drawLine(bx - 7, 23, bx + 7, 9, COR_REC);
+    } else if ((millis() / 400) % 2) {
+      canvas.fillCircle(bx, 16, 7, COR_REC);
+    }
     canvas.setTextColor(COR_TEXTO);
     canvas.setTextDatum(middle_right);
     canvas.setTextSize(2);
@@ -383,6 +430,7 @@ void setup() {
   canvas.setColorDepth(16);
   canvas.createSprite(SCREEN_W, SCREEN_H);
   M5.Speaker.setVolume(160);
+  efeitosInicia();
 
   buffer = (uint8_t*)ps_malloc(FOLGA + 44 + MAX_AMOSTRAS * 2 + FOLGA);
   wav = buffer + FOLGA;
@@ -403,14 +451,25 @@ void loop() {
   if (!gravando && !enviando && M5.BtnB.wasHold()) { comecaGravacao(); mudou = true; }
   if (gravando) {
     continuaGravacao();
-    // botão de toque falha por instantes: só conta como solto depois de SOLTO_MS sem toque
-    if (M5.BtnB.isPressed()) {
+    // "segurando" = qualquer toque na tela, assim dá pra arrastar pra fora do B.
+    // O toque falha por instantes: só conta como solto depois de SOLTO_MS sem toque.
+    if (M5.Touch.getCount() > 0) {
       soltoDesdeMs = 0;
+      auto t = M5.Touch.getDetail();
+      if (xInicioToque < 0) xInicioToque = t.base_x;
+      arrasteX = t.x - xInicioToque;
+      if (abs(arrasteX) >= ARRASTE_CANCELA) {
+        terminaGravacao();
+        Serial.printf("LOG gravacao cancelada (arrastou %dpx)\n", arrasteX);
+        sinalCancelou();
+        mudaEstado(ANIM_PARADO, false);
+        mudou = true;
+      }
     } else if (!soltoDesdeMs) {
       soltoDesdeMs = agora;
-      Serial.printf("LOG B solto aos %.1fs (esperando confirmar)\n", (agora - inicioGravacaoMs) / 1000.0f);
+      Serial.printf("LOG solto aos %.1fs (esperando confirmar)\n", (agora - inicioGravacaoMs) / 1000.0f);
     }
-    if (soltoDesdeMs && agora - soltoDesdeMs >= SOLTO_MS) {
+    if (gravando && soltoDesdeMs && agora - soltoDesdeMs >= SOLTO_MS) {
       soltoDesdeMs = 0;
       bool ok = terminaGravacao();
       Serial.printf("LOG gravacao: segurou %.1fs, gravou %.1fs de audio\n",
@@ -430,6 +489,7 @@ void loop() {
 
     auto toque = M5.Touch.getDetail();
     if (toque.wasPressed() && !revelandoComida && tocouNoPato(toque.x, toque.y)) {
+      vibra(VIBRA_CURTA);
       quack(estado == ANIM_EMPOLGADO ? QUACK_FELIZ
             : estado == ANIM_PASSANDO_MAL ? QUACK_ENJOADO
             : estado == ANIM_TRISTE_FOME ? QUACK_TRISTE
@@ -447,6 +507,7 @@ void loop() {
   if (revelandoComida) {
     if (agora - inicioRevelaMs >= REVELA_MS) {
       revelandoComida = false;
+      vibra(VIBRA_NHAC);
       frame = 0;
       ultimoFrameMs = agora;
       mudou = true;
@@ -475,6 +536,7 @@ void loop() {
   }
   if (gravando) mudou = true;  // atualiza o contador de segundos
 
+  efeitosAtualiza(agora);
   if (mudou) desenhaCena();
   delay(gravando ? 1 : 10);
 }
