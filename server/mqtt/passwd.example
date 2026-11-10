@@ -1,0 +1,2 @@
+# Gerar com:
+#   docker run --rm -i eclipse-mosquitto:2 sh -c "echo 'patogochi:SENHA_AQUI' > /tmp/pw && mosquitto_passwd -U /tmp/pw && cat /tmp/pw" | grep '^patogochi:' > passwd

@@ -1,0 +1,88 @@
+{
+  "interactionModel": {
+    "languageModel": {
+      "invocationName": "patogochi",
+      "intents": [
+        { "name": "AMAZON.HelpIntent",     "samples": [] },
+        { "name": "AMAZON.StopIntent",     "samples": [] },
+        { "name": "AMAZON.CancelIntent",   "samples": [] },
+        { "name": "AMAZON.FallbackIntent", "samples": [] },
+
+        {
+          "name": "StatusIntent",
+          "samples": [
+            "como você está",
+            "como você tá",
+            "como tá",
+            "como está",
+            "status",
+            "me dá o status",
+            "qual seu estado",
+            "quantos hp",
+            "tá bem"
+          ],
+          "slots": []
+        },
+
+        {
+          "name": "CocosIntent",
+          "samples": [
+            "quantos cocôs",
+            "quantos cocô",
+            "quantos lembretes atrasados",
+            "lista lembretes",
+            "cocôs vencidos",
+            "tem cocô na tela"
+          ],
+          "slots": []
+        },
+
+        {
+          "name": "AlimentarIntent",
+          "samples": [
+            "me alimenta com {ideia}",
+            "come {ideia}",
+            "ideia {ideia}",
+            "tenho uma ideia {ideia}",
+            "nova ideia {ideia}",
+            "anota {ideia}",
+            "fala pro pato {ideia}",
+            "fala pro patogochi {ideia}",
+            "diz pro pato {ideia}",
+            "diz pro patogochi {ideia}",
+            "manda pro pato {ideia}",
+            "manda pro patogochi {ideia}",
+            "patogochi {ideia}",
+            "pato {ideia}",
+            "nova ideia é {ideia}",
+            "a ideia é {ideia}",
+            "ideia nova {ideia}",
+            "come isso {ideia}",
+            "alimenta com {ideia}",
+            "toma {ideia}",
+            "engole {ideia}"
+          ],
+          "slots": [
+            { "name": "ideia", "type": "AMAZON.SearchQuery" }
+          ]
+        },
+
+        {
+          "name": "ReviverIntent",
+          "samples": [
+            "revive",
+            "me desculpa {desculpa}",
+            "desculpa {desculpa}",
+            "volta pato {desculpa}",
+            "volta patogochi {desculpa}",
+            "não morre {desculpa}"
+          ],
+          "slots": [
+            { "name": "desculpa", "type": "AMAZON.SearchQuery" }
+          ]
+        }
+      ],
+      "types": []
+    }
+  }
+}

@@ -1,0 +1,5 @@
+config/.env
+mqtt/passwd
+mqtt/certs/
+vendor/
+public/sprites/

@@ -1,0 +1,24 @@
+services:
+  patogochi:
+    build: .
+    container_name: patogochi
+    restart: unless-stopped
+    env_file:
+      - ./config/.env
+    volumes:
+      # sessão persistente do Claude CLI (sobrevive a rebuilds)
+      # montado em /var/www/.claude pq php-fpm roda como www-data
+      - claude-home:/var/www/.claude
+    networks:
+      - cobranca-net
+    expose:
+      - "8080"
+
+networks:
+  cobranca-net:
+    name: codegus-cobranca_cobranca-net
+    external: true
+
+volumes:
+  claude-home:
+    name: patogochi_claude_home
