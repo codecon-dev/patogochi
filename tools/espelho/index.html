@@ -89,10 +89,29 @@ function desenha() {
     const img = imgs.coco[(estado.frameCoco + i * 3) % imgs.coco.length];
     ctx.drawImage(img, COCO_X[i], GROUND_Y - COCO_H * COCO_SCALE + 4, COCO_W * COCO_SCALE, COCO_H * COCO_SCALE);
   }
+  if (balao) desenhaBalao();
+}
+
+function desenhaBalao() {
+  ctx.font = '16px system-ui, sans-serif';
+  const palavras = balao.split(' '), linhas = [];
+  let atual = '';
+  for (const p of palavras) {
+    const t = atual ? atual + ' ' + p : p;
+    if (ctx.measureText(t).width > W - 40 && atual) { linhas.push(atual); atual = p; } else atual = t;
+  }
+  if (atual) linhas.push(atual);
+  const n = Math.min(3, linhas.length), h = n * 18 + 12;
+  ctx.fillStyle = '#fff'; ctx.strokeStyle = '#222'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.roundRect(8.5, 6.5, W - 17, h, 8); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#222'; ctx.textBaseline = 'top';
+  for (let i = 0; i < n; i++) ctx.fillText(linhas[i], 20, 12 + i * 18);
 }
 
 // linha do firmware: "PATO <anim> <frame> <cocos> <frameCoco>"
+let balao = '';
 function processaLinha(linha) {
+  if (linha.startsWith('FALA')) { balao = linha.slice(5).trim(); desenha(); return; }
   const p = linha.trim().split(' ');
   if (p[0] !== 'PATO' || p.length < 5) return;
   estado = { anim: p[1], frame: +p[2], cocos: +p[3], frameCoco: +p[4], comida: p[5] || null, revelando: p[6] === '1' };

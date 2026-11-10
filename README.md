@@ -7,6 +7,8 @@ Tamagotchi de pato no M5Stack Core2 que se alimenta de ideias. Plano completo em
 - `assets/sprites/` — PNGs do pato (32x32), cocô e comidas
 - `tools/gen_sprites.py` — converte os PNGs em arrays RGB565 pro firmware
 - `firmware/` — código do Core2 (PlatformIO + M5Unified)
+- `tools/mock-servidor/` — back-end de mentira em PHP que segue o API.md
+- `tools/espelho/` — espelho da tela no Chrome
 
 ## Rodar o firmware
 
@@ -21,9 +23,26 @@ pio run -t upload                     # compila e grava no Core2 (cabo USB-C)
 
 A porta do Core2 está em `firmware/platformio.ini` (`upload_port`). Pra achar a sua: `ls /dev/cu.*`.
 
-## Botões (modo debug)
+## Botões
 
-A = estado anterior · B = põe/tira cocô · C = próximo estado · toque no pato = quack
+- **B segurando:** grava uma ideia (solta pra enviar)
+- **B toque curto:** põe/tira cocô (debug)
+- **A / C:** estado anterior / próximo (debug)
+- **Toque no pato:** quack
+
+## WiFi e servidor
+
+```sh
+cp firmware/include/config.example.h firmware/include/config.h   # preencha WiFi (2.4 GHz) e URL
+```
+
+`config.h` fica fora do git. Contrato da API em [API.md](API.md).
+
+Servidor de mentira pra testar sem o back-end real (salva os áudios em `tools/mock-servidor/gravacoes/`):
+
+```sh
+php -S 0.0.0.0:8080 tools/mock-servidor/index.php
+```
 
 ## Espelho da tela no Mac
 

@@ -1,10 +1,19 @@
-// Patogochi — etapa 1: pato vivo na tela.
-// Botões de toque embaixo da tela (modo debug):
-//   A = estado anterior · B = põe/tira cocô · C = próximo estado
+// Patogochi — etapa 2: o pato te ouve.
+// Botões de toque embaixo da tela:
+//   A = estado anterior (debug) · C = próximo estado (debug)
+//   B segurando = grava ideia (solta pra enviar) · B toque curto = põe/tira cocô (debug)
 // Toque no pato = quack.
 #include <M5Unified.h>
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <ArduinoJson.h>
 #include "sprites.h"
 #include "sons.h"
+#if __has_include("config.h")
+#include "config.h"
+#else
+#include "config.example.h"
+#endif
 
 // ---------- layout ----------
 static constexpr int SCREEN_W = 320;
@@ -19,6 +28,8 @@ static constexpr int MAX_COCOS = 4;
 // cores (RGB565)
 static constexpr uint16_t COR_FUNDO = 0x9E89;  // verde
 static constexpr uint16_t COR_TEXTO = 0x2104;
+static constexpr uint16_t COR_BALAO = TFT_WHITE;
+static constexpr uint16_t COR_REC = TFT_RED;
 
 // ms por frame de cada animação (ajustar olhando no aparelho)
 static const uint16_t FRAME_MS[ANIM_COUNT] = {
@@ -73,13 +84,14 @@ static bool tocouNoPato(int x, int y) {
   return x >= DUCK_X && x < DUCK_X + 32 * DUCK_SCALE && y >= DUCK_Y && y < DUCK_Y + 32 * DUCK_SCALE;
 }
 
+// ---------- estado da tela ----------
 static Anim estado = ANIM_PARADO;
 static uint16_t frame = 0;
 static uint32_t ultimoFrameMs = 0;
 static uint16_t frameCoco = 0;
 static uint32_t ultimoCocoMs = 0;
 static int cocos = 0;
-static Food comida = FOOD_PIPOCA;  // troca a cada vez que ele termina de comer
+static Food comida = FOOD_PIPOCA;
 
 // antes de comer: corte pra comida em tela cheia, depois o pato comendo
 static constexpr uint32_t REVELA_MS = 1500;
@@ -87,11 +99,178 @@ static constexpr int COMIDA_SCALE = 12;          // 16px -> 192px
 static bool revelandoComida = false;
 static uint32_t inicioRevelaMs = 0;
 
+// sequência de uma ideia: comer uma vez -> reagir por um tempo -> parado
+static constexpr uint32_t REACAO_MS = 5000;
+static bool comendoIdeia = false;      // false = comendo em loop (debug pelo botão C)
+static Anim reacaoPendente = ANIM_PARADO;
+static uint32_t fimReacaoMs = 0;       // 0 = sem reação em andamento
+
+// balão de fala
+static constexpr uint32_t BALAO_MS = 8000;
+static String balao;
+static uint32_t fimBalaoMs = 0;
+
 static void comecaRevelacao() {
   revelandoComida = true;
   inicioRevelaMs = millis();
 }
 
+static void mudaEstado(Anim novo, bool comSom = true) {
+  estado = novo;
+  frame = 0;
+  ultimoFrameMs = millis();
+  revelandoComida = false;
+  if (estado == ANIM_COMENDO) comecaRevelacao();
+  if (comSom) quackDoEstado(estado);
+}
+
+static void enviaEspelho();
+
+static void mostraBalao(const String& texto) {
+  balao = texto;
+  fimBalaoMs = millis() + BALAO_MS;
+  Serial.printf("FALA %s\n", texto.c_str());
+}
+
+static void escondeBalao() {
+  if (balao.length() == 0) return;
+  balao = "";
+  Serial.println("FALA");
+}
+
+// ---------- gravação ----------
+static constexpr uint32_t TAXA_MIC = 16000;
+static constexpr size_t MAX_AMOSTRAS = TAXA_MIC * 10;      // 10 s
+static constexpr size_t BLOCO = 1024;                      // amostras por pedaço gravado
+static constexpr size_t MIN_AMOSTRAS = TAXA_MIC / 2;       // menos de 0,5 s = ignora
+static uint8_t* wav = nullptr;                             // cabeçalho (44 bytes) + amostras
+static int16_t* amostras = nullptr;
+static size_t gravadas = 0;
+static bool gravando = false;
+static uint32_t inicioGravacaoMs = 0;
+
+static void escreveCabecalhoWav(size_t n) {
+  uint32_t dados = n * 2, taxaBytes = TAXA_MIC * 2, tamanho = 36 + dados, fmt = 16;
+  uint16_t pcm = 1, canais = 1, bloco = 2, bits = 16;
+  uint8_t* p = wav;
+  memcpy(p, "RIFF", 4); memcpy(p + 4, &tamanho, 4); memcpy(p + 8, "WAVEfmt ", 8);
+  memcpy(p + 16, &fmt, 4); memcpy(p + 20, &pcm, 2); memcpy(p + 22, &canais, 2);
+  memcpy(p + 24, &TAXA_MIC, 4); memcpy(p + 28, &taxaBytes, 4); memcpy(p + 32, &bloco, 2);
+  memcpy(p + 34, &bits, 2); memcpy(p + 36, "data", 4); memcpy(p + 40, &dados, 4);
+}
+
+static void comecaGravacao() {
+  M5.Speaker.end();  // no Core2, microfone e alto-falante não funcionam juntos
+  M5.Mic.begin();
+  gravadas = 0;
+  gravando = true;
+  inicioGravacaoMs = millis();
+  escondeBalao();
+  mudaEstado(ANIM_OUVINDO, false);
+}
+
+static void continuaGravacao() {
+  if (gravadas + BLOCO > MAX_AMOSTRAS) return;  // chegou no limite: espera soltar o botão
+  if (M5.Mic.record(amostras + gravadas, BLOCO, TAXA_MIC)) gravadas += BLOCO;
+}
+
+// devolve true se tem áudio suficiente pra enviar
+static bool terminaGravacao() {
+  while (M5.Mic.isRecording()) delay(1);
+  M5.Mic.end();
+  M5.Speaker.begin();
+  gravando = false;
+  return gravadas >= MIN_AMOSTRAS;
+}
+
+// ---------- envio pro servidor (roda numa tarefa separada pra animação não travar) ----------
+struct Resposta {
+  bool ok = false;
+  String texto, opiniao, erro;
+  int comida = -1;                 // índice em FOODS, -1 = nenhuma
+  Anim reacao = ANIM_DEBOCHANDO;
+};
+static Resposta resposta;
+static volatile bool enviando = false;
+static volatile bool respostaPronta = false;
+
+static int indiceComida(const char* nome) {
+  if (!nome) return -1;
+  for (int i = 0; i < FOOD_COUNT; i++) if (strcmp(FOODS[i].name, nome) == 0) return i;
+  return -1;
+}
+
+static Anim animPorNome(const char* nome, Anim padrao) {
+  if (!nome) return padrao;
+  for (int i = 0; i < ANIM_COUNT; i++) if (strcmp(ANIMS[i].name, nome) == 0) return (Anim)i;
+  return padrao;
+}
+
+static void tarefaEnvio(void*) {
+  Resposta r;
+  if (WiFi.status() != WL_CONNECTED) {
+    r.erro = "Sem WiFi :(";
+  } else {
+    HTTPClient http;
+    http.begin(String(SERVIDOR_URL) + "/ideia");
+    http.addHeader("Content-Type", "audio/wav");
+    http.addHeader("X-Pato-Token", PATO_TOKEN);
+    http.setTimeout(30000);
+    int codigo = http.POST(wav, 44 + gravadas * 2);
+    String corpo = codigo > 0 ? http.getString() : "";
+    http.end();
+    Serial.printf("LOG POST /ideia -> %d %s\n", codigo, corpo.c_str());
+
+    JsonDocument doc;
+    bool jsonOk = !deserializeJson(doc, corpo);
+    if (codigo == 200 && jsonOk) {
+      r.ok = true;
+      r.texto = doc["texto"] | "";
+      r.opiniao = doc["opiniao"] | "";
+      r.comida = indiceComida(doc["comida"]);
+      r.reacao = animPorNome(doc["reacao"], ANIM_DEBOCHANDO);
+    } else if (codigo <= 0) {
+      r.erro = "Servidor não respondeu";
+    } else {
+      r.erro = jsonOk && doc["erro"].is<const char*>() ? String(doc["erro"].as<const char*>())
+                                                       : "Erro " + String(codigo);
+    }
+  }
+  resposta = r;
+  respostaPronta = true;
+  enviando = false;
+  vTaskDelete(nullptr);
+}
+
+static void enviaIdeia() {
+  escreveCabecalhoWav(gravadas);
+  enviando = true;
+  respostaPronta = false;
+  mudaEstado(ANIM_PENSANDO, false);
+  xTaskCreatePinnedToCore(tarefaEnvio, "envio", 12288, nullptr, 1, nullptr, 0);
+}
+
+static void trataResposta() {
+  respostaPronta = false;
+  if (!resposta.ok) {
+    mostraBalao(resposta.erro);
+    mudaEstado(ANIM_DEBOCHANDO);
+    fimReacaoMs = millis() + REACAO_MS;
+    return;
+  }
+  mostraBalao(resposta.opiniao.length() ? resposta.opiniao : resposta.texto);
+  if (resposta.comida >= 0) {
+    comida = (Food)resposta.comida;
+    comendoIdeia = true;
+    reacaoPendente = resposta.reacao;
+    mudaEstado(ANIM_COMENDO, false);
+  } else {
+    mudaEstado(resposta.reacao);
+    fimReacaoMs = millis() + REACAO_MS;
+  }
+}
+
+// ---------- desenho ----------
 // Desenha um frame ampliado, pulando os pixels transparentes.
 static void desenhaSprite(const Sprite& s, uint16_t f, int x, int y, int escala) {
   const uint16_t* px = s.data + (size_t)f * s.w * s.h;
@@ -104,10 +283,40 @@ static void desenhaSprite(const Sprite& s, uint16_t f, int x, int y, int escala)
   }
 }
 
-static void enviaEspelho() {
-  // espelho: tools/espelho/ lê essa linha pelo USB e redesenha no navegador
-  Serial.printf("PATO %s %u %d %u %s %d\n", ANIMS[estado].name, frame, cocos, frameCoco,
-                FOODS[comida].name, revelandoComida ? 1 : 0);
+// Quebra o texto em até 3 linhas que cabem em `largura` pixels.
+static int quebraLinhas(const String& texto, int largura, String linhas[3]) {
+  int n = 0;
+  String atual;
+  int i = 0;
+  while (i <= (int)texto.length() && n < 3) {
+    int fim = texto.indexOf(' ', i);
+    if (fim < 0) fim = texto.length();
+    String palavra = texto.substring(i, fim);
+    String teste = atual.length() ? atual + " " + palavra : palavra;
+    if (canvas.textWidth(teste) > largura && atual.length()) {
+      linhas[n++] = atual;
+      atual = palavra;
+    } else {
+      atual = teste;
+    }
+    i = fim + 1;
+  }
+  if (n < 3 && atual.length()) linhas[n++] = atual;
+  return n;
+}
+
+static void desenhaBalao() {
+  canvas.setFont(&fonts::efontJA_16);
+  canvas.setTextSize(1);
+  String linhas[3];
+  int n = quebraLinhas(balao, SCREEN_W - 40, linhas);
+  int h = n * 18 + 12;
+  canvas.fillRoundRect(8, 6, SCREEN_W - 16, h, 8, COR_BALAO);
+  canvas.drawRoundRect(8, 6, SCREEN_W - 16, h, 8, COR_TEXTO);
+  canvas.setTextColor(COR_TEXTO);
+  canvas.setTextDatum(top_left);
+  for (int i = 0; i < n; i++) canvas.drawString(linhas[i], 20, 12 + i * 18);
+  canvas.setFont(&fonts::Font0);
 }
 
 static void desenhaCena() {
@@ -132,39 +341,66 @@ static void desenhaCena() {
                   GROUND_Y - coco.h * COCO_SCALE + 4, COCO_SCALE);
   }
 
-  // rótulo de debug
+  if (gravando) {
+    // bolinha vermelha piscando + segundos gravados
+    if ((millis() / 400) % 2) canvas.fillCircle(SCREEN_W - 20, 16, 7, COR_REC);
+    canvas.setTextColor(COR_TEXTO);
+    canvas.setTextDatum(middle_right);
+    canvas.setTextSize(2);
+    canvas.drawString(String(gravadas / (float)TAXA_MIC, 1) + "s", SCREEN_W - 32, 17);
+  } else if (balao.length()) {
+    desenhaBalao();
+  }
+
+  // rótulos de debug
   canvas.setTextColor(COR_TEXTO);
-  canvas.setTextDatum(top_left);
   canvas.setTextSize(1);
-  canvas.drawString(ANIMS[estado].name, 6, 6);
+  if (!balao.length() && !gravando) {
+    canvas.setTextDatum(top_left);
+    canvas.drawString(ANIMS[estado].name, 6, 6);
+  }
+  canvas.setTextDatum(bottom_left);
+  canvas.drawString(WiFi.status() == WL_CONNECTED ? "wifi ok" : "sem wifi", 6, SCREEN_H - 2);
   canvas.setTextDatum(bottom_center);
-  canvas.drawString("< estado     coco     estado >", SCREEN_W / 2, SCREEN_H - 2);
+  canvas.drawString("< estado   segura: fala   estado >", SCREEN_W / 2 + 20, SCREEN_H - 2);
 
   canvas.pushSprite(0, 0);
   enviaEspelho();
 }
 
-static void trocaEstado(int delta) {
-  // COCO é overlay, não estado do pato: pula ele
-  int n = ANIM_COCO;
-  estado = (Anim)(((int)estado + delta + n) % n);
-  frame = 0;
-  ultimoFrameMs = millis();
-  revelandoComida = false;
-  if (estado == ANIM_COMENDO) comecaRevelacao();
-  quackDoEstado(estado);
+static void enviaEspelho() {
+  // espelho: tools/espelho/ lê essa linha pelo USB e redesenha no navegador
+  Serial.printf("PATO %s %u %d %u %s %d\n", ANIMS[estado].name, frame, cocos, frameCoco,
+                FOODS[comida].name, revelandoComida ? 1 : 0);
 }
 
+static void trocaEstadoDebug(int delta) {
+  // COCO é overlay, não estado do pato: pula ele
+  int n = ANIM_COCO;
+  comendoIdeia = false;
+  fimReacaoMs = 0;
+  mudaEstado((Anim)(((int)estado + delta + n) % n));
+}
+
+// ---------- setup / loop ----------
 void setup() {
   auto cfg = M5.config();
   cfg.serial_baudrate = 115200;
   M5.begin(cfg);
   Serial.begin(115200);
   Serial.println("PATOGOCHI boot");
+
   canvas.setPsram(true);
   canvas.setColorDepth(16);
   canvas.createSprite(SCREEN_W, SCREEN_H);
   M5.Speaker.setVolume(160);
+
+  wav = (uint8_t*)ps_malloc(44 + MAX_AMOSTRAS * 2);
+  amostras = (int16_t*)(wav + 44);
+
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(WIFI_SSID, WIFI_PASS);  // conecta em segundo plano
+
   desenhaCena();
 }
 
@@ -173,17 +409,40 @@ void loop() {
   uint32_t agora = millis();
   bool mudou = false;
 
-  if (M5.BtnA.wasPressed()) { trocaEstado(-1); mudou = true; }
-  if (M5.BtnC.wasPressed()) { trocaEstado(+1); mudou = true; }
-  if (M5.BtnB.wasPressed()) { cocos = (cocos + 1) % (MAX_COCOS + 1); mudou = true; }
-
-  auto toque = M5.Touch.getDetail();
-  if (toque.wasPressed() && !revelandoComida && tocouNoPato(toque.x, toque.y)) {
-    quack(estado == ANIM_EMPOLGADO ? QUACK_FELIZ
-          : estado == ANIM_PASSANDO_MAL ? QUACK_ENJOADO
-          : estado == ANIM_TRISTE_FOME ? QUACK_TRISTE
-          : estado == ANIM_MORTO ? QUACK_MORTE : QUACK_NORMAL);
+  // gravação: segura B pra falar, solta pra enviar
+  if (!gravando && !enviando && M5.BtnB.wasHold()) { comecaGravacao(); mudou = true; }
+  if (gravando) {
+    continuaGravacao();
+    if (M5.BtnB.wasReleased() || M5.BtnB.isReleased()) {
+      if (terminaGravacao()) enviaIdeia();
+      else mudaEstado(ANIM_PARADO, false);
+      mudou = true;
+    }
   }
+  if (respostaPronta) { trataResposta(); mudou = true; }
+
+  bool ocupado = gravando || enviando;
+  if (!ocupado) {
+    if (M5.BtnA.wasPressed()) { trocaEstadoDebug(-1); mudou = true; }
+    if (M5.BtnC.wasPressed()) { trocaEstadoDebug(+1); mudou = true; }
+    if (M5.BtnB.wasClicked()) { cocos = (cocos + 1) % (MAX_COCOS + 1); mudou = true; }
+
+    auto toque = M5.Touch.getDetail();
+    if (toque.wasPressed() && !revelandoComida && tocouNoPato(toque.x, toque.y)) {
+      quack(estado == ANIM_EMPOLGADO ? QUACK_FELIZ
+            : estado == ANIM_PASSANDO_MAL ? QUACK_ENJOADO
+            : estado == ANIM_TRISTE_FOME ? QUACK_TRISTE
+            : estado == ANIM_MORTO ? QUACK_MORTE : QUACK_NORMAL);
+    }
+  }
+
+  // fim da reação a uma ideia -> volta pro parado
+  if (fimReacaoMs && (int32_t)(agora - fimReacaoMs) >= 0) {
+    fimReacaoMs = 0;
+    mudaEstado(ANIM_PARADO, false);
+    mudou = true;
+  }
+  if (balao.length() && (int32_t)(agora - fimBalaoMs) >= 0) { escondeBalao(); mudou = true; }
 
   if (revelandoComida) {
     if (agora - inicioRevelaMs >= REVELA_MS) {
@@ -195,10 +454,17 @@ void loop() {
   } else if (agora - ultimoFrameMs >= FRAME_MS[estado]) {
     frame = (frame + 1) % ANIMS[estado].frames;
     ultimoFrameMs = agora;
-    // terminou de comer: próxima comida (debug, depois vem do servidor)
     if (frame == 0 && estado == ANIM_COMENDO) {
-      comida = (Food)((comida + 1) % FOOD_COUNT);
-      comecaRevelacao();
+      if (comendoIdeia) {
+        // comeu a ideia: agora reage
+        comendoIdeia = false;
+        mudaEstado(reacaoPendente);
+        fimReacaoMs = agora + REACAO_MS;
+      } else {
+        // debug: próxima comida em loop
+        comida = (Food)((comida + 1) % FOOD_COUNT);
+        comecaRevelacao();
+      }
     }
     mudou = true;
   }
@@ -207,7 +473,8 @@ void loop() {
     ultimoCocoMs = agora;
     mudou = true;
   }
+  if (gravando) mudou = true;  // atualiza o contador de segundos
 
   if (mudou) desenhaCena();
-  delay(10);
+  delay(gravando ? 1 : 10);
 }

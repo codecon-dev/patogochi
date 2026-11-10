@@ -1,2 +1,4 @@
 firmware/.pio/
 .DS_Store
+firmware/include/config.h
+tools/mock-servidor/gravacoes/
