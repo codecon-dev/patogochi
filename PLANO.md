@@ -113,9 +113,9 @@ Obs: o endpoint de ideia precisa aceitar **áudio (Core2) ou texto (Alexa)**.
 
 ## Decisões em aberto
 
-- [ ] Firmware: **PlatformIO + M5Unified (C++)** (recomendado) ou UIFlow/MicroPython
+- [x] Firmware: **PlatformIO + M5Unified (C++)**
 - [x] Servidor: **PHP** (parceiro cuida)
-- [ ] Transcrição: Whisper API (simples) ou whisper.cpp local (sem custo)
+- [x] Transcrição: whisper.cpp no servidor (parceiro)
 - [x] Botão de gravar: **C (direita)**, segura pra falar, solta pra enviar, arrasta pro lado cancela
 - [x] Mapeamento de comidas (definido pela API)
 - [x] Pato morto **revive** com prenda (ver "Morte e ressurreição")
