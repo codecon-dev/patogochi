@@ -436,22 +436,32 @@ static void trataResposta() {
     // nada escrito na tela: o pato só debocha (erro vai pro log e pro rótulo de debug)
     ultimoErro = resposta.erro;
     Serial.printf("LOG erro: %s\n", resposta.erro.c_str());
+    if (estadoBase == ANIM_MORTO) {
+      vibra(VIBRA_DUPLA);  // morto não debocha: continua morto
+      voltaProBase(false);
+      return;
+    }
     mudaEstado(ANIM_DEBOCHANDO);
     fimReacaoMs = millis() + REACAO_MS;
     return;
   }
   if (modoEnvio != ENVIO_IDEIA) {
-    // reviver: aceitou -> pato volta empolgado; não aceitou -> debocha (continua morto)
+    // reviver: aceitou -> pato volta empolgado; não aceitou -> continua morto, com quack choroso
     if (resposta.reviveu) {
       Serial.println("LOG pato reviveu!");
       estadoBase = ANIM_PARADO;
       if (resposta.hp >= 0) hp = resposta.hp;
       if (resposta.mortes >= 0) mortes = resposta.mortes;
       mudaEstado(ANIM_EMPOLGADO);
+      fimReacaoMs = millis() + REACAO_MS;
     } else {
-      mudaEstado(ANIM_DEBOCHANDO);
+      // não convenceu: continua morto (TODO: animação "quase reviveu" quando o desenho chegar)
+      Serial.println("LOG reviver recusado: continua morto");
+      quack(QUACK_TRISTE);
+      vibra(VIBRA_DUPLA);
+      luz(LUZ_APAGADA);
+      voltaProBase(false);
     }
-    fimReacaoMs = millis() + REACAO_MS;
     return;
   }
   if (resposta.comida >= 0) {
