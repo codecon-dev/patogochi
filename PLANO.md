@@ -42,6 +42,7 @@ Barra de ícones embaixo, um por botão:
 - **Status:** 5 corações = fome (cada um = 20 de hp) + lápide com o número de mortes.
 - **Toque no pato:** quack. **Chacoalhar:** pato tonto.
 - **Segurar no pato 10 s:** painel de debug (WiFi, IP, servidor, fome, hora, última gravação/resposta/erro, bateria, memória).
+- **Despertador:** seg–sex 6:15, o pato acorda fazendo quack feliz com luzes, vibração e o relógio piscando. Toque na tela ou qualquer botão desliga. Teste: painel de debug aberto + toque curto no C.
 - Nenhum texto de opinião na tela: o pato só reage.
 
 ---
@@ -58,7 +59,7 @@ Barra de ícones embaixo, um por botão:
 | `debochando` | 3 | Ideia meh / minhoca / erro | quack normal | apagadas | curta |
 | `passando_mal` | 46 | Comida estragada (10 min) | quack enjoado (lento) | vermelho rápido | longa |
 | `triste_fome` | 61 | Fome (hp) abaixo de 30 | quack choroso | vermelho fraco | — |
-| `dormindo` | 2 | 21h–7h, quando estaria parado | — | apagadas | — |
+| `dormindo` | 2 | 21h–7h, quando estaria parado (fundo roxo com estrelas) | — | apagadas | — |
 | `morto` | 1 | Único estado que vem do servidor (`sprite: morto`) | quack de morte | apagadas | bem longa |
 | `tonto` | 6 | Chacoalhou o pato vivo (4 s) | quack enjoado | azul girando | longa |
 | `lapide` | 1 | Tela de status, com o nº de mortes | | | |

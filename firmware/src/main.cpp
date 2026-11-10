@@ -40,6 +40,8 @@ static const int BOTAO_X[3] = {53, 160, 267};                // centro dos botõ
 
 // cores (RGB565)
 static constexpr uint16_t COR_FUNDO = 0x9E89;  // verde
+static constexpr uint16_t COR_NOITE = 0x396D;  // roxo (#3D2C6B) quando o pato dorme
+static uint16_t corIcone = TFT_BLACK;          // vira branco no fundo roxo
 static constexpr uint16_t COR_TEXTO = 0x2104;
 static constexpr uint16_t COR_REC = TFT_RED;
 
@@ -562,9 +564,22 @@ static constexpr int BRILHO_NORMAL = 160, BRILHO_DESCANSO = 40, BRILHO_NOITE = 1
 // ---------- noite ----------
 // Entre NOITE_INICIO e NOITE_FIM (horário de Brasília, via NTP) o pato dorme quando estaria parado.
 static constexpr int NOITE_INICIO = 21, NOITE_FIM = 7;  // 21h às 7h
+// ---------- despertador ----------
+// Segunda a sexta às DESPERTA_HORA:DESPERTA_MIN o pato acorda fazendo barulho.
+// Desliga tocando na tela ou em qualquer botão (ou sozinho depois de DESPERTA_MAX_MS).
+// Depois de desligado, o pato fica acordado mesmo antes do fim da noite.
+static constexpr int DESPERTA_HORA = 6, DESPERTA_MIN = 15;
+static constexpr uint32_t DESPERTA_MAX_MS = 10 * 60 * 1000;
+static constexpr uint32_t DESPERTA_QUACK_MS = 1500;
+static bool despertando = false;
+static uint32_t inicioDespertarMs = 0, ultimoQuackDespertarMs = 0;
+static int diaDespertou = -1;     // tm_yday do último despertar (não tocar 2x no mesmo dia)
+static int diaAcordou = -1;       // tm_yday em que o despertador foi desligado
+
 static bool ehNoite() {
   struct tm t;
   if (!getLocalTime(&t, 0)) return false;  // ainda sem hora: considera dia
+  if (t.tm_yday == diaAcordou && t.tm_hour < NOITE_FIM) return false;  // já acordou pelo despertador
   return t.tm_hour >= NOITE_INICIO || t.tm_hour < NOITE_FIM;  // atravessa a meia-noite
 }
 
@@ -800,7 +815,7 @@ static void desenhaIcone(const char* const* icone, int cx, int cy, int escala, b
     for (int i = 0; i < ICONE_TAM; i++) {
       if (!cheio(i, j)) continue;
       if (contorno && cheio(i - 1, j) && cheio(i + 1, j) && cheio(i, j - 1) && cheio(i, j + 1)) continue;
-      canvas.fillRect(x0 + i * escala, y0 + j * escala, escala, escala, TFT_BLACK);
+      canvas.fillRect(x0 + i * escala, y0 + j * escala, escala, escala, corIcone);
     }
 }
 
@@ -1026,8 +1041,33 @@ static void desenhaExtrasPato() {
   }
 }
 
+// céu de noite: estrelinhas piscando em volta do pato (x, y, tamanho, fase)
+static void desenhaNoite() {
+  static const int16_t ESTRELAS[][4] = {
+    {18, 14, 2, 0}, {52, 40, 1, 1}, {30, 78, 1, 2}, {14, 120, 2, 1}, {44, 160, 1, 0},
+    {290, 18, 2, 2}, {262, 52, 1, 0}, {300, 90, 1, 1}, {276, 130, 2, 0}, {304, 170, 1, 2},
+    {120, 10, 1, 1}, {200, 16, 1, 2}, {160, 6, 2, 0},
+  };
+  uint32_t passo = millis() / 500;
+  for (auto& e : ESTRELAS) {
+    int x = e[0], y = e[1], t = e[2];
+    bool brilha = (passo + e[3]) % 3 != 0;   // cada estrela apaga 1/3 do tempo, fora de sincronia
+    uint16_t cor = brilha ? 0xFFE0 : 0x8C51; // amarelo / lilás apagado
+    if (t == 2) {
+      canvas.fillRect(x - 1, y - 4, 2, 8, cor);   // estrela em cruz
+      canvas.fillRect(x - 4, y - 1, 8, 2, cor);
+      if (brilha) canvas.fillRect(x - 1, y - 1, 2, 2, TFT_WHITE);
+    } else {
+      canvas.fillRect(x - 1, y - 1, 2, 2, cor);   // pontinho
+    }
+  }
+}
+
 static void desenhaCena() {
-  canvas.fillScreen(COR_FUNDO);
+  bool noite = tela == TELA_PATO && estado == ANIM_DORMINDO && !revelandoComida;
+  canvas.fillScreen(noite ? COR_NOITE : COR_FUNDO);
+  corIcone = noite ? TFT_WHITE : TFT_BLACK;
+  if (noite) desenhaNoite();
 
   if (revelandoComida) {
     const Sprite& c = FOODS[comida];
@@ -1045,8 +1085,22 @@ static void desenhaCena() {
   } else {
     desenhaSprite(ANIMS[estado], frame, DUCK_X, DUCK_Y, DUCK_SCALE);
   }
-  if (!gravando) desenhaBarra();
+  if (!gravando && !despertando) desenhaBarra();
   if (tela == TELA_PATO) desenhaExtrasPato();
+  if (despertando) {
+    // relógio piscando no lugar da barra de ícones
+    struct tm t;
+    if (getLocalTime(&t, 0)) {
+      char hora[6];
+      snprintf(hora, sizeof(hora), "%02d:%02d", t.tm_hour, t.tm_min);
+      canvas.setFont(&fonts::Font4);
+      canvas.setTextSize(1);
+      canvas.setTextDatum(middle_center);
+      canvas.setTextColor((millis() / 500) % 2 ? COR_TEXTO : COR_REC);
+      canvas.drawString(hora, SCREEN_W / 2, BARRA_Y + 18);
+      canvas.setFont(&fonts::Font0);
+    }
+  }
 
   // cocôs alinhados no chão, alternando lados do pato
   const Sprite& coco = ANIMS[ANIM_COCO];
@@ -1175,7 +1229,7 @@ void loop() {
 
   // gravação: segura C (direita, como no WhatsApp) pra falar, solta pra enviar
   bool podeGravar = estadoBase != ANIM_MORTO || exigencia == EXIGE_DESCULPA;  // morto exigindo massagem: microfone mudo
-  if (tela == TELA_PATO && !travaToque && !gravando && !enviando && M5.BtnC.wasHold()) {
+  if (tela == TELA_PATO && !travaToque && !despertando && !gravando && !enviando && M5.BtnC.wasHold()) {
     if (podeGravar) comecaGravacao();
     else vibra(VIBRA_DUPLA);
     mudou = true;
@@ -1275,7 +1329,7 @@ void loop() {
   // telaNoInicio: o mesmo aperto do A que volta pro pato não pode reabrir as tarefas
   Tela telaNoInicio = tela;
   if (travaToque && !gravando && M5.Touch.getCount() == 0) travaToque = false;
-  bool botoesLivres = !travaToque;
+  bool botoesLivres = !travaToque && !despertando;  // despertador: qualquer toque só desliga
   if (botoesLivres && tela != TELA_PATO) {
     if (M5.BtnA.wasPressed() || M5.BtnB.wasPressed() || M5.BtnC.wasPressed()) ultimoBotaoMs = agora;
     if (M5.BtnA.wasPressed() || agora - ultimoBotaoMs >= TELA_VOLTA_MS) {
@@ -1395,6 +1449,10 @@ void loop() {
     mudou = true;
   }
   if (gravando) mudou = true;  // atualiza o contador de segundos
+  {
+    static uint32_t ultimoPiscaMs = 0;
+    if (estado == ANIM_DORMINDO && agora - ultimoPiscaMs >= 500) { ultimoPiscaMs = agora; mudou = true; }  // estrelas
+  }
   if (modoDebug && agora % 1000 < 15) mudou = true;  // painel atualiza ~1x por segundo
 
   // acelerômetro: pato vivo -> chacoalhar deixa tonto; pato morto -> massagem cardíaca
@@ -1437,7 +1495,7 @@ void loop() {
   {
     static uint32_t ultimaInteracaoMs = 0;
     static int brilhoAtual = -1;
-    if (M5.Touch.getCount() > 0 || gravando || enviando || batidas > 0 || !ocioso() ||
+    if (M5.Touch.getCount() > 0 || gravando || enviando || batidas > 0 || !ocioso() || despertando ||
         tela != TELA_PATO || ultimaInteracaoMs == 0) {
       ultimaInteracaoMs = agora;
     }
@@ -1449,12 +1507,62 @@ void loop() {
     }
   }
 
+  // ---- despertador ----
+  {
+    static uint32_t ultimaChecagemMs = 0;
+    // teste: com o painel de debug aberto, toque curto no C dispara o despertador agora
+    bool testeDespertador = modoDebug && !despertando && !gravando && M5.BtnC.wasClicked();
+    if (testeDespertador) ultimaChecagemMs = 0;
+    if (!despertando && (testeDespertador || agora - ultimaChecagemMs > 1000)) {
+      ultimaChecagemMs = agora;
+      struct tm t;
+      bool horaCerta = getLocalTime(&t, 0) && t.tm_wday >= 1 && t.tm_wday <= 5 &&
+                       t.tm_hour == DESPERTA_HORA && t.tm_min == DESPERTA_MIN && t.tm_yday != diaDespertou;
+      if ((horaCerta || testeDespertador) && !gravando && !enviando) {
+        if (horaCerta) diaDespertou = t.tm_yday;
+        modoDebug = false;
+        despertando = true;
+        inicioDespertarMs = agora;
+        ultimoQuackDespertarMs = 0;
+        tela = TELA_PATO;
+        Serial.println("LOG despertador tocando");
+        if (estadoBase != ANIM_MORTO) mudaEstado(ANIM_EMPOLGADO, false);
+        mudou = true;
+      }
+    }
+    if (despertando) {
+      mudou = true;  // relógio piscando
+      // (os primeiros 800 ms são ignorados: o próprio toque que disparou o teste não desliga)
+      bool desligou = agora - inicioDespertarMs > 800 &&
+                      (M5.Touch.getCount() > 0 || M5.BtnA.wasPressed() || M5.BtnB.wasPressed() ||
+                       M5.BtnC.wasPressed());
+      if (desligou || agora - inicioDespertarMs >= DESPERTA_MAX_MS) {
+        despertando = false;
+        travaToque = true;  // o toque que desligou não abre menu nem grava
+        struct tm t;
+        if (getLocalTime(&t, 0)) diaAcordou = t.tm_yday;
+        Serial.println(desligou ? "LOG despertador desligado" : "LOG despertador parou sozinho");
+        luz(LUZ_APAGADA);
+        vibra(VIBRA_CURTA);
+        voltaProBase(false);
+        mudou = true;
+      } else if (agora - ultimoQuackDespertarMs >= DESPERTA_QUACK_MS) {
+        ultimoQuackDespertarMs = agora;
+        quack(QUACK_FELIZ);
+        vibra(VIBRA_FESTA);
+        luz(LUZ_FESTA);
+        if (estado != ANIM_EMPOLGADO && estadoBase != ANIM_MORTO) mudaEstado(ANIM_EMPOLGADO, false);
+        mudou = true;
+      }
+    }
+  }
+
   // ---- noite: pato dorme / acorda sozinho (confere a cada 30 s) ----
   {
     static uint32_t ultimaChecagemNoiteMs = 0;
     if (agora - ultimaChecagemNoiteMs > 30000) {
       ultimaChecagemNoiteMs = agora;
-      if (ocioso() && estado != baseVisual()) {
+      if (ocioso() && !despertando && estado != baseVisual()) {
         voltaProBase(false);
         mudou = true;
       }

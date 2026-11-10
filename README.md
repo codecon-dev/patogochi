@@ -37,9 +37,10 @@ Barra de ícones embaixo da tela, um por botão:
 - **Pato morto:** a cada morte ele sorteia o que exige, e a tela avisa:
   - *massagem cardíaca*: 30 chacoalhadas a 100-120 por minuto, com "Stayin' Alive" subindo o volume (luz verde = no ritmo, laranja = quase, vermelha = recomeça)
   - *súplica*: segurar C e implorar (vai pro `/reviver.php` como `desculpa`)
+- **Despertador:** seg–sex 6:15, quack feliz + luzes + vibração + relógio piscando. Toque na tela ou qualquer botão desliga (para sozinho em 10 min). Teste: com o painel de debug aberto, toque curto no C.
 - **Segurar no pato 10 s:** liga/desliga o painel de debug (WiFi, IP, servidor, fome, hora, última gravação/resposta/erro, bateria)
 
-Sozinho: tela fica fraca depois de 1 min sem mexer, pato dorme entre 21h e 7h, cocôs = lembretes vencidos (vem do servidor), bateria piscando abaixo de 20%.
+Sozinho: tela fica fraca depois de 1 min sem mexer, pato dorme entre 21h e 7h (fundo roxo com estrelas), cocôs = lembretes vencidos (vem do servidor), bateria piscando abaixo de 20%.
 
 ## WiFi e servidor
 

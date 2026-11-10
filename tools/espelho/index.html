@@ -71,10 +71,25 @@ carregando.push(fetch('../../firmware/include/icones.h').then(r => r.text()).the
     icones[m[1]] = [...m[2].matchAll(/"([^"]*)"/g)].map(x => x[1]);
 }).catch(() => console.warn('falhou icones.h')));
 
+let corIcone = '#000';
+const ESTRELAS = [[18,14,2,0],[52,40,1,1],[30,78,1,2],[14,120,2,1],[44,160,1,0],[290,18,2,2],[262,52,1,0],
+                  [300,90,1,1],[276,130,2,0],[304,170,1,2],[120,10,1,1],[200,16,1,2],[160,6,2,0]];
+function desenhaNoite() {
+  const passo = Math.floor(performance.now() / 500);
+  for (const [x, y, t, fase] of ESTRELAS) {
+    const brilha = (passo + fase) % 3 !== 0;
+    ctx.fillStyle = brilha ? '#ffff00' : '#8888a0';
+    if (t === 2) {
+      ctx.fillRect(x - 1, y - 4, 2, 8); ctx.fillRect(x - 4, y - 1, 8, 2);
+      if (brilha) { ctx.fillStyle = '#fff'; ctx.fillRect(x - 1, y - 1, 2, 2); }
+    } else ctx.fillRect(x - 1, y - 1, 2, 2);
+  }
+}
+
 function desenhaIcone(icone, cx, cy, escala) {
   if (!icone) return;
   const n = icone.length, x0 = cx - n * escala / 2, y0 = cy - n * escala / 2;
-  ctx.fillStyle = '#000';
+  ctx.fillStyle = corIcone;
   icone.forEach((linha, j) => [...linha].forEach((c, i) => {
     if (c === 'k') ctx.fillRect(x0 + i * escala, y0 + j * escala, escala, escala);
   }));
@@ -222,8 +237,10 @@ function desenhaStatus() {
 
 function desenha() {
   ctx.clearRect(0, 0, W, H);
+  const noite = ui.tela === TELA_PATO && estado.anim === 'dormindo' && !estado.revelando;
   if (FUNDOS[fundo] === 'cena') {
-    ctx.fillStyle = COR_FUNDO; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = noite ? '#3D2C6B' : COR_FUNDO; ctx.fillRect(0, 0, W, H);
+    if (noite) desenhaNoite();
   } else if (FUNDOS[fundo] === 'verde') {
     ctx.fillStyle = '#00FF00'; ctx.fillRect(0, 0, W, H);
   }
@@ -239,7 +256,9 @@ function desenha() {
     const frames = imgs[estado.anim];
     if (frames) ctx.drawImage(frames[estado.frame % frames.length], DUCK_X, DUCK_Y, 32 * DUCK_SCALE, 32 * DUCK_SCALE);
   }
+  corIcone = noite && FUNDOS[fundo] === 'cena' ? '#fff' : '#000';
   if (!ui.gravando) desenhaBarra();
+  corIcone = '#000';
   if (ui.tela === TELA_PATO) {
     desenhaExtrasPato();
     for (let i = 0; i < estado.cocos && i < COCO_X.length; i++) {
