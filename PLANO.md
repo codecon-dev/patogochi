@@ -41,10 +41,17 @@ O Core2 só desenha e grava. Assim ele sobrevive a reboot e bateria acabando.
 | `morto` | 1 | Fome zerada por tempo demais |
 | `coco` | 8 | Overlay: 1 cocô por lembrete vencido |
 
-## Comidas (`assets/sprites/comidas/`) — proposta, a confirmar
+## Comidas (`assets/sprites/comidas/`) — definido pela API
 
 | Comida | Tipo de ideia |
 |---|---|
+| `pipoca` | Ideia de conteúdo / vídeo |
+| `moeda_chocolate` | Ideia de negócio / dinheiro |
+| `biscoito_sorte` | Ideia com prazo (vira lembrete) |
+| `minhoca` | Ideia sem pé nem cabeça |
+| `comida_estragada` | Ideia ruim → `passando_mal` |
+
+---|---|
 | `pipoca` | Ideia de conteúdo / vídeo |
 | `moeda_chocolate` | Ideia de negócio / dinheiro |
 | `minhoca` | Ideia técnica / código |
@@ -110,9 +117,9 @@ Obs: o endpoint de ideia precisa aceitar **áudio (Core2) ou texto (Alexa)**.
 - [x] Servidor: **PHP** (parceiro cuida)
 - [ ] Transcrição: Whisper API (simples) ou whisper.cpp local (sem custo)
 - [x] Botão de gravar: **C (direita)**, segura pra falar, solta pra enviar, arrasta pro lado cancela
-- [ ] Mapeamento de comidas acima
+- [x] Mapeamento de comidas (definido pela API)
 - [x] Pato morto **revive** com prenda (ver "Morte e ressurreição")
-- [ ] Opinião do pato: só texto na tela ou também som no speaker?
+- [x] Opinião do pato: nada escrito na tela, só a reação
 
 ## Riscos conhecidos (do roteiro)
 

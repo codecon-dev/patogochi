@@ -273,8 +273,10 @@ static uint8_t* montaMultipart(size_t& tamanho) {
   return inicio;
 }
 
+static bool consultandoEstado();
 static void tarefaEnvio(void*) {
   Resposta r;
+  while (consultandoEstado()) vTaskDelay(pdMS_TO_TICKS(50));
   if (WiFi.status() != WL_CONNECTED) {
     r.erro = "sem wifi";
   } else {
@@ -348,6 +350,59 @@ static void trataResposta() {
   }
 }
 
+// ---------- estado do servidor (o pato mora lá) ----------
+static volatile bool consultando = false;
+static bool consultandoEstado() { return consultando; }
+// GET /estado.php a cada 2 min. O sprite que o servidor manda (parado, triste_fome, morto...)
+// vira o "estado base": é pra onde o pato volta quando não está gravando/comendo/reagindo.
+static constexpr uint32_t CONSULTA_MS = 2 * 60 * 1000;
+static Anim estadoBase = ANIM_PARADO;
+static int hp = -1, mortes = 0, versaoServidor = -1;
+static uint32_t ultimaConsultaMs = 0;
+static bool jaConsultou = false;
+static volatile bool estadoPronto = false;
+static Anim novoBase = ANIM_PARADO;
+static int novoHp = -1, novasMortes = 0, novaVersao = -1;
+
+static void tarefaEstado(void*) {
+  WiFiClientSecure seguro;  // antes do HTTPClient (ver tarefaEnvio)
+  HTTPClient http;
+  comecaHttp(http, seguro, "/estado.php");
+  http.setTimeout(10000);
+  int codigo = http.GET();
+  String corpo = codigo == 200 ? http.getString() : "";
+  http.end();
+  Serial.printf("LOG GET /estado.php -> %d %s\n", codigo, corpo.c_str());
+  JsonDocument doc;
+  if (codigo == 200 && !deserializeJson(doc, corpo)) {
+    novoBase = animPorNome(doc["sprite"], ANIM_PARADO);
+    novoHp = doc["hp"] | -1;
+    novasMortes = doc["mortes"] | 0;
+    novaVersao = doc["versao"] | -1;
+    estadoPronto = true;
+  }
+  consultando = false;
+  vTaskDelete(nullptr);
+}
+
+static void consultaEstado() {
+  if (consultando || enviando || WiFi.status() != WL_CONNECTED) return;
+  consultando = true;
+  ultimaConsultaMs = millis();
+  jaConsultou = true;
+  xTaskCreatePinnedToCore(tarefaEstado, "estado", 12288, nullptr, 1, nullptr, 0);
+}
+
+// pato sem nada pra fazer: pode mostrar o estado base
+static bool ocioso() {
+  return !gravando && !enviando && !comendoIdeia && !fimReacaoMs && !revelandoComida &&
+         estado != ANIM_COMENDO;
+}
+
+static void voltaProBase(bool comSom) {
+  mudaEstado(estadoBase, comSom);
+}
+
 // ---------- desenho ----------
 // Desenha um frame ampliado, pulando os pixels transparentes.
 static void desenhaSprite(const Sprite& s, uint16_t f, int x, int y, int escala) {
@@ -362,11 +417,14 @@ static void desenhaSprite(const Sprite& s, uint16_t f, int x, int y, int escala)
 }
 
 static void desenhaPainelDebug() {
-  String linhas[12];
+  String linhas[14];
   int n = 0;
   bool wifiOk = WiFi.status() == WL_CONNECTED;
   linhas[n++] = "DEBUG  (segura no pato 10s pra fechar)";
-  linhas[n++] = "estado: " + String(ANIMS[estado].name) + "   cocos: " + String(cocos);
+  linhas[n++] = "estado: " + String(ANIMS[estado].name) + "  base: " + String(ANIMS[estadoBase].name);
+  linhas[n++] = "fome(hp): " + (hp >= 0 ? String(hp) : String("?")) + "  mortes: " + String(mortes) +
+                "  versao: " + String(versaoServidor) + "  consulta ha " +
+                (jaConsultou ? String((millis() - ultimaConsultaMs) / 1000) + "s" : String("-"));
   linhas[n++] = wifiOk ? "wifi: " + WiFi.SSID() + "  " + String(WiFi.RSSI()) + " dBm" : "wifi: DESCONECTADO";
   linhas[n++] = "ip: " + (wifiOk ? WiFi.localIP().toString() : String("-"));
   linhas[n++] = "servidor: " + String(SERVIDOR_URL);
@@ -480,7 +538,7 @@ void loop() {
         terminaGravacao();
         Serial.printf("LOG gravacao cancelada (arrastou %dpx)\n", arrasteX);
         sinalCancelou();
-        mudaEstado(ANIM_PARADO, false);
+        voltaProBase(false);
         mudou = true;
       }
     } else if (!soltoDesdeMs) {
@@ -495,11 +553,29 @@ void loop() {
       Serial.printf("LOG gravacao: segurou %.1fs, gravou %.1fs de audio\n",
                     (agora - inicioGravacaoMs) / 1000.0f, gravadas / (float)TAXA_MIC);
       if (ok) enviaIdeia();
-      else mudaEstado(ANIM_PARADO, false);
+      else voltaProBase(false);
       mudou = true;
     }
   }
   if (respostaPronta) { trataResposta(); mudou = true; }
+
+  // consulta o servidor assim que o WiFi conecta e depois a cada CONSULTA_MS
+  if (!gravando && WiFi.status() == WL_CONNECTED &&
+      (!jaConsultou || agora - ultimaConsultaMs >= CONSULTA_MS)) {
+    consultaEstado();
+  }
+  if (estadoPronto) {
+    estadoPronto = false;
+    hp = novoHp;
+    mortes = novasMortes;
+    versaoServidor = novaVersao;
+    bool mudouBase = novoBase != estadoBase;
+    estadoBase = novoBase;
+    if (mudouBase && ocioso()) {
+      voltaProBase(true);  // com som: ex. entrou em triste_fome ou morreu
+      mudou = true;
+    }
+  }
 
   bool ocupado = gravando || enviando;
   if (!ocupado) {
@@ -532,7 +608,8 @@ void loop() {
   // fim da reação a uma ideia -> volta pro parado
   if (fimReacaoMs && (int32_t)(agora - fimReacaoMs) >= 0) {
     fimReacaoMs = 0;
-    mudaEstado(ANIM_PARADO, false);
+    voltaProBase(false);
+    consultaEstado();  // a ideia mudou a fome: atualiza já
     mudou = true;
   }
 
