@@ -173,6 +173,7 @@ static void mudaEstado(Anim novo, bool comSom = true) {
 // ---------- estado do pato que vem do servidor (preenchido pela consulta de estado) ----------
 static Anim estadoBase = ANIM_PARADO;
 static int hp = -1, mortes = 0, versaoServidor = -1;
+static constexpr int FOME_TRISTE = 30;  // hp abaixo disso -> triste_fome
 
 // ---------- o que o pato exige pra reviver (sorteado a cada morte) ----------
 // Guardado na memória do Core2 junto com o número da morte: reiniciar não muda o sorteio.
@@ -451,8 +452,8 @@ static void trataResposta() {
     // reviver: aceitou -> pato volta empolgado; não aceitou -> continua morto, com quack choroso
     if (resposta.reviveu) {
       Serial.println("LOG pato reviveu!");
-      estadoBase = ANIM_PARADO;
       if (resposta.hp >= 0) hp = resposta.hp;
+      estadoBase = hp >= 0 && hp < FOME_TRISTE ? ANIM_TRISTE_FOME : ANIM_PARADO;
       if (resposta.mortes >= 0) mortes = resposta.mortes;
       mudaEstado(ANIM_EMPOLGADO);
       fimReacaoMs = millis() + REACAO_MS;
@@ -465,6 +466,11 @@ static void trataResposta() {
       voltaProBase(false);
     }
     return;
+  }
+  if (resposta.comida < 0) {
+    // tipo vazio/desconhecido: loga e mostra uma comida mesmo assim (senão pula direto pra reação)
+    Serial.printf("LOG tipo de comida desconhecido na resposta: %s\n", resposta.corpo.c_str());
+    resposta.comida = resposta.reacao == ANIM_PASSANDO_MAL ? FOOD_COMIDA_ESTRAGADA : FOOD_PIPOCA;
   }
   if (resposta.comida >= 0) {
     comida = (Food)resposta.comida;
@@ -480,8 +486,8 @@ static void trataResposta() {
 // ---------- estado do servidor (o pato mora lá) ----------
 static volatile bool consultando = false;
 static bool consultandoEstado() { return consultando; }
-// GET /estado.php a cada 10 s. O sprite que o servidor manda (parado, triste_fome, morto...)
-// vira o "estado base": é pra onde o pato volta quando não está gravando/comendo/reagindo.
+// GET /estado.php a cada 10 s. O "estado base" (pra onde o pato volta quando não está
+// gravando/comendo/reagindo) sai da fome: parado, triste_fome, ou morto se o servidor disser.
 static constexpr uint32_t CONSULTA_MS = 10 * 1000;  // 10 s
 static uint32_t ultimaConsultaMs = 0;
 static bool jaConsultou = false;
@@ -509,8 +515,14 @@ static void tarefaEstado(void*) {
                   ESP.getFreeHeap(), heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL), corpo.c_str());
     JsonDocument doc;
     if (codigo == 200 && !deserializeJson(doc, corpo)) {
-      novoBase = animPorNome(doc["sprite"], ANIM_PARADO);
       novoHp = doc["hp"] | -1;
+      // O desenho é decidido aqui pela fome. Do servidor só vale o "morto" (é ele que mata, depois
+      // de 12 h com fome 0, e o /reviver.php depende disso). Reações (empolgado, passando_mal...)
+      // ficam por conta do Core2 depois de cada ideia.
+      const char* sprite = doc["sprite"] | "";
+      novoBase = strcmp(sprite, "morto") == 0 ? ANIM_MORTO
+               : (novoHp >= 0 && novoHp < FOME_TRISTE) ? ANIM_TRISTE_FOME
+               : ANIM_PARADO;
       novasMortes = doc["mortes"] | 0;
       novosCocos = doc["coco"] | 0;  // lembretes vencidos pendentes
       novaVersao = doc["versao"] | -1;

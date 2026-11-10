@@ -57,9 +57,9 @@ Barra de ícones embaixo, um por botão:
 | `empolgado` | 2 | Ideia boa / reviveu | quack feliz (agudo, 2x) | arco-íris | festa |
 | `debochando` | 3 | Ideia meh / minhoca / erro | quack normal | apagadas | curta |
 | `passando_mal` | 46 | Comida estragada (10 min) | quack enjoado (lento) | vermelho rápido | longa |
-| `triste_fome` | 61 | Fome baixa (vem do servidor) | quack choroso | vermelho fraco | — |
+| `triste_fome` | 61 | Fome (hp) abaixo de 30 | quack choroso | vermelho fraco | — |
 | `dormindo` | 2 | 21h–7h, quando estaria parado | — | apagadas | — |
-| `morto` | 1 | Vem do servidor | quack de morte | apagadas | bem longa |
+| `morto` | 1 | Único estado que vem do servidor (`sprite: morto`) | quack de morte | apagadas | bem longa |
 | `tonto` | 6 | Chacoalhou o pato vivo (4 s) | quack enjoado | azul girando | longa |
 | `lapide` | 1 | Tela de status, com o nº de mortes | | | |
 | `coco` | 8 | 1 por lembrete vencido (até 4) | | | |
