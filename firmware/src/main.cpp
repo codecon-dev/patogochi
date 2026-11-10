@@ -428,6 +428,8 @@ static void enviaGravacao() {
   comecaEnvio(estadoBase == ANIM_MORTO ? ENVIO_DESCULPA : ENVIO_IDEIA);
 }
 
+static void voltaProBase(bool comSom);
+
 static void trataResposta() {
   respostaPronta = false;
   ultimoCodigo = resposta.codigo;
