@@ -293,7 +293,7 @@ static uint8_t* montaMultipart(size_t& tamanho) {
 
 static bool consultandoEstado();
 // cada envio tem um id; se o loop desistir (ENVIO_DESISTE_MS), a resposta atrasada é descartada
-static constexpr uint32_t ENVIO_DESISTE_MS = 70000;
+static constexpr uint32_t ENVIO_DESISTE_MS = 90000;
 static volatile uint32_t envioId = 0;
 static uint32_t envioDesdeMs = 0;
 
@@ -311,7 +311,7 @@ static void tarefaEnvio(void*) {
     comecaHttp(http, seguro, "/ideia.php");
     http.addHeader("Content-Type", String("multipart/form-data; boundary=") + LIMITE);
     http.addHeader("X-Api-Token", PATO_TOKEN);
-    http.setTimeout(45000);  // transcrição + Claude podem demorar
+    http.setTimeout(60000);  // transcrição + Claude podem demorar (hoje leva 33-41 s)
     size_t tamanho;
     uint8_t* corpoEnvio = montaMultipart(tamanho);
     int codigo = http.POST(corpoEnvio, tamanho);
