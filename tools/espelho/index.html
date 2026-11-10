@@ -151,11 +151,17 @@ function desenhaGravando() {
 }
 
 function desenhaExtrasPato() {
-  if (ui.base === 'morto' && ui.batidas > 0) {
-    const pulso = performance.now() - ultimaBatida < 150;
-    desenhaIcone(icones.CORACAO, W / 2, 40, pulso ? 5 : 4);
-    ctx.strokeStyle = '#000'; ctx.lineWidth = 1; ctx.strokeRect(40.5, 80.5, W - 81, 9);
-    ctx.fillStyle = COR_REC; ctx.fillRect(42, 82, (W - 84) * ui.batidas / MASSAGEM_BATIDAS, 6);
+  if (ui.base === 'morto' && !ui.gravando) {
+    if (ui.batidas > 0) {
+      const pulso = performance.now() - ultimaBatida < 150;
+      desenhaIcone(icones.CORACAO, W / 2, 20, pulso ? 3 : 2);
+      ctx.strokeStyle = '#000'; ctx.lineWidth = 1; ctx.strokeRect(40.5, 42.5, W - 81, 9);
+      ctx.fillStyle = COR_REC; ctx.fillRect(42, 44, (W - 84) * ui.batidas / MASSAGEM_BATIDAS, 6);
+    } else {
+      const pulo = Math.trunc(4 * Math.sin(performance.now() / 160));
+      desenhaIcone(icones.CORACAO, W / 2, 20 + pulo, 2);
+      texto('faça massagem cardíaca!', W / 2, 52, COR_TEXTO, 16, 'center');
+    }
   }
   if (ui.bateriaFraca && Math.floor(performance.now() / 700) % 2) {
     const bx = W - 34, by = 6;

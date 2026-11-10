@@ -12,6 +12,10 @@
 #include <ArduinoJson.h>
 #include "sprites.h"
 #include "sons.h"
+#if __has_include("sons_privados.h")
+#include "sons_privados.h"   // música e batida do coração (fora do git, ver tools/gen_sons.py)
+#define TEM_SONS_PRIVADOS 1
+#endif
 #include "efeitos.h"
 #include "icones.h"
 #if __has_include("config.h")
@@ -322,65 +326,67 @@ static volatile uint32_t envioId = 0;
 static uint32_t envioDesdeMs = 0;
 
 static void tarefaEnvio(void*) {
-  uint32_t meuId = envioId;
-  Resposta r;
-  for (int i = 0; i < 300 && consultandoEstado(); i++) vTaskDelay(pdMS_TO_TICKS(50));  // até 15 s
-  if (WiFi.status() != WL_CONNECTED) {
-    r.erro = "sem wifi";
-  } else {
-    // ordem importa: o cliente precisa ser destruído DEPOIS do HTTPClient,
-    // senão o destrutor do HTTPClient usa um cliente que já morreu (crash)
-    WiFiClientSecure seguro;
-    HTTPClient http;
-    ModoEnvio modo = modoEnvio;
-    const char* caminho = modo == ENVIO_IDEIA ? "/ideia.php" : "/reviver.php";
-    comecaHttp(http, seguro, caminho);
-    http.addHeader("X-Api-Token", PATO_TOKEN);
-    int codigo;
-    if (modo == ENVIO_MASSAGEM) {
-      http.addHeader("Content-Type", "application/json");
-      http.setTimeout(15000);
-      codigo = http.POST(String("{\"metodo\":\"massagem\",\"batidas\":") + massagemBatidas +
-                         ",\"bpm\":" + String(massagemBpm, 1) + "}");
+  {  // escopo próprio: destrói tudo ANTES do vTaskDelete (senão vaza memória)
+    uint32_t meuId = envioId;
+    Resposta r;
+    for (int i = 0; i < 300 && consultandoEstado(); i++) vTaskDelay(pdMS_TO_TICKS(50));  // até 15 s
+    if (WiFi.status() != WL_CONNECTED) {
+      r.erro = "sem wifi";
     } else {
-      http.addHeader("Content-Type", String("multipart/form-data; boundary=") + LIMITE);
-      http.setTimeout(60000);  // transcrição + Claude podem demorar (hoje leva 33-41 s)
-      size_t tamanho;
-      uint8_t* corpoEnvio = montaMultipart(tamanho, modo == ENVIO_DESCULPA);
-      codigo = http.POST(corpoEnvio, tamanho);
-    }
-    String corpo = codigo > 0 ? http.getString() : "";
-    http.end();
-    Serial.printf("LOG POST %s -> %d %s\n", caminho, codigo, corpo.c_str());
-    r.codigo = codigo;
-    r.corpo = corpo;
+      // ordem importa: o cliente precisa ser destruído DEPOIS do HTTPClient,
+      // senão o destrutor do HTTPClient usa um cliente que já morreu (crash)
+      WiFiClientSecure seguro;
+      HTTPClient http;
+      ModoEnvio modo = modoEnvio;
+      const char* caminho = modo == ENVIO_IDEIA ? "/ideia.php" : "/reviver.php";
+      comecaHttp(http, seguro, caminho);
+      http.addHeader("X-Api-Token", PATO_TOKEN);
+      int codigo;
+      if (modo == ENVIO_MASSAGEM) {
+        http.addHeader("Content-Type", "application/json");
+        http.setTimeout(15000);
+        codigo = http.POST(String("{\"metodo\":\"massagem\",\"batidas\":") + massagemBatidas +
+                           ",\"bpm\":" + String(massagemBpm, 1) + "}");
+      } else {
+        http.addHeader("Content-Type", String("multipart/form-data; boundary=") + LIMITE);
+        http.setTimeout(60000);  // transcrição + Claude podem demorar (hoje leva 33-41 s)
+        size_t tamanho;
+        uint8_t* corpoEnvio = montaMultipart(tamanho, modo == ENVIO_DESCULPA);
+        codigo = http.POST(corpoEnvio, tamanho);
+      }
+      String corpo = codigo > 0 ? http.getString() : "";
+      http.end();
+      Serial.printf("LOG POST %s -> %d %s\n", caminho, codigo, corpo.c_str());
+      r.codigo = codigo;
+      r.corpo = corpo;
 
-    JsonDocument doc;
-    bool jsonOk = !deserializeJson(doc, corpo);
-    if (codigo == 200 && jsonOk && modo == ENVIO_IDEIA) {
-      r.ok = true;
-      r.comida = indiceComida(doc["tipo"]);
-      r.reacao = animPorNome(doc["estado"], ANIM_EMPOLGADO);
-    } else if (codigo == 200 && jsonOk) {
-      r.ok = true;
-      r.reviveu = doc["ok"] | false;
-      r.hp = doc["hp"] | -1;
-      r.mortes = doc["mortes"] | -1;
-    } else if (codigo == 409) {
-      r.erro = modo == ENVIO_IDEIA ? "pato morto (409)" : "pato ja ta vivo (409)";
-    } else if (codigo <= 0) {
-      r.erro = "servidor não respondeu";
-    } else {
-      r.erro = jsonOk && doc["error"].is<const char*>() ? String(doc["error"].as<const char*>())
-                                                        : "Erro " + String(codigo);
+      JsonDocument doc;
+      bool jsonOk = !deserializeJson(doc, corpo);
+      if (codigo == 200 && jsonOk && modo == ENVIO_IDEIA) {
+        r.ok = true;
+        r.comida = indiceComida(doc["tipo"]);
+        r.reacao = animPorNome(doc["estado"], ANIM_EMPOLGADO);
+      } else if (codigo == 200 && jsonOk) {
+        r.ok = true;
+        r.reviveu = doc["ok"] | false;
+        r.hp = doc["hp"] | -1;
+        r.mortes = doc["mortes"] | -1;
+      } else if (codigo == 409) {
+        r.erro = modo == ENVIO_IDEIA ? "pato morto (409)" : "pato ja ta vivo (409)";
+      } else if (codigo <= 0) {
+        r.erro = "servidor não respondeu";
+      } else {
+        r.erro = jsonOk && doc["error"].is<const char*>() ? String(doc["error"].as<const char*>())
+                                                          : "Erro " + String(codigo);
+      }
     }
-  }
-  if (meuId == envioId) {
-    resposta = r;
-    respostaPronta = true;
-    enviando = false;
-  } else {
-    Serial.println("LOG resposta atrasada descartada");
+    if (meuId == envioId) {
+      resposta = r;
+      respostaPronta = true;
+      enviando = false;
+    } else {
+      Serial.println("LOG resposta atrasada descartada");
+    }
   }
   vTaskDelete(nullptr);
 }
@@ -455,25 +461,31 @@ static constexpr uint32_t CONSULTA_DESISTE_MS = 30000;
 static volatile uint32_t consultaId = 0;
 
 static void tarefaEstado(void*) {
-  uint32_t meuId = consultaId;
-  WiFiClientSecure seguro;  // antes do HTTPClient (ver tarefaEnvio)
-  HTTPClient http;
-  comecaHttp(http, seguro, "/estado.php");
-  http.setTimeout(10000);
-  int codigo = http.GET();
-  String corpo = codigo == 200 ? http.getString() : "";
-  http.end();
-  Serial.printf("LOG GET /estado.php -> %d %s\n", codigo, corpo.c_str());
-  JsonDocument doc;
-  if (codigo == 200 && !deserializeJson(doc, corpo)) {
-    novoBase = animPorNome(doc["sprite"], ANIM_PARADO);
-    novoHp = doc["hp"] | -1;
-    novasMortes = doc["mortes"] | 0;
-    novosCocos = doc["coco"] | 0;  // lembretes vencidos pendentes
-    novaVersao = doc["versao"] | -1;
-    if (meuId == consultaId) estadoPronto = true;
+  {  // escopo próprio: destrói HTTPClient/WiFiClientSecure ANTES do vTaskDelete (senão vaza ~50 KB)
+    uint32_t meuId = consultaId;
+    WiFiClientSecure seguro;  // antes do HTTPClient (ver tarefaEnvio)
+    HTTPClient http;
+    comecaHttp(http, seguro, "/estado.php");
+    http.setTimeout(10000);
+    int codigo = http.GET();
+    String corpo = codigo == 200 ? http.getString() : "";
+    http.end();
+    char erroTls[100] = "";
+    if (codigo < 0) seguro.lastError(erroTls, sizeof(erroTls));
+    Serial.printf("LOG GET /estado.php -> %d %s %s | heap %u maior bloco %u | %s\n", codigo,
+                  codigo < 0 ? http.errorToString(codigo).c_str() : "", erroTls,
+                  ESP.getFreeHeap(), heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL), corpo.c_str());
+    JsonDocument doc;
+    if (codigo == 200 && !deserializeJson(doc, corpo)) {
+      novoBase = animPorNome(doc["sprite"], ANIM_PARADO);
+      novoHp = doc["hp"] | -1;
+      novasMortes = doc["mortes"] | 0;
+      novosCocos = doc["coco"] | 0;  // lembretes vencidos pendentes
+      novaVersao = doc["versao"] | -1;
+      if (meuId == consultaId) estadoPronto = true;
+    }
+    if (meuId == consultaId) consultando = false;
   }
-  if (meuId == consultaId) consultando = false;
   vTaskDelete(nullptr);
 }
 
@@ -543,33 +555,35 @@ static String diaMes(const char* iso) {
 }
 
 static void tarefaLembretes(void*) {
-  for (int i = 0; i < 300 && (consultando || enviando); i++) vTaskDelay(pdMS_TO_TICKS(50));  // uma conexão por vez (até 15 s)
-  WiFiClientSecure seguro;  // antes do HTTPClient (ver tarefaEnvio)
-  HTTPClient http;
-  comecaHttp(http, seguro, "/lembretes.php");
-  http.addHeader("X-Api-Token", PATO_TOKEN);
-  http.setTimeout(10000);
-  int codigo = http.GET();
-  String corpo = codigo > 0 ? http.getString() : "";
-  http.end();
-  Serial.printf("LOG GET /lembretes.php -> %d %s\n", codigo, corpo.c_str());
-  JsonDocument doc;
-  if (codigo == 200 && !deserializeJson(doc, corpo)) {
-    int n = 0;
-    for (JsonObject l : doc["lembretes"].as<JsonArray>()) {
-      if (n >= MAX_LEMBRETES) break;
-      lembretes[n].id = l["id"] | 0;
-      lembretes[n].texto = l["texto"] | "";
-      lembretes[n].prazo = diaMes(l["vence_em"]);
-      lembretes[n].vencido = l["vencido"] | false;
-      lembretes[n].feito = false;
-      n++;
+  {  // escopo próprio: destrói HTTPClient/WiFiClientSecure ANTES do vTaskDelete (senão vaza ~50 KB)
+    for (int i = 0; i < 300 && (consultando || enviando); i++) vTaskDelay(pdMS_TO_TICKS(50));  // uma conexão por vez (até 15 s)
+    WiFiClientSecure seguro;  // antes do HTTPClient (ver tarefaEnvio)
+    HTTPClient http;
+    comecaHttp(http, seguro, "/lembretes.php");
+    http.addHeader("X-Api-Token", PATO_TOKEN);
+    http.setTimeout(10000);
+    int codigo = http.GET();
+    String corpo = codigo > 0 ? http.getString() : "";
+    http.end();
+    Serial.printf("LOG GET /lembretes.php -> %d %s\n", codigo, corpo.c_str());
+    JsonDocument doc;
+    if (codigo == 200 && !deserializeJson(doc, corpo)) {
+      int n = 0;
+      for (JsonObject l : doc["lembretes"].as<JsonArray>()) {
+        if (n >= MAX_LEMBRETES) break;
+        lembretes[n].id = l["id"] | 0;
+        lembretes[n].texto = l["texto"] | "";
+        lembretes[n].prazo = diaMes(l["vence_em"]);
+        lembretes[n].vencido = l["vencido"] | false;
+        lembretes[n].feito = false;
+        n++;
+      }
+      qtdLembretes = n;
+      cargaLembretes = CARGA_OK;
+    } else {
+      erroLembretes = codigo <= 0 ? String("servidor não respondeu") : "erro " + String(codigo);
+      cargaLembretes = CARGA_ERRO;
     }
-    qtdLembretes = n;
-    cargaLembretes = CARGA_OK;
-  } else {
-    erroLembretes = codigo <= 0 ? String("servidor não respondeu") : "erro " + String(codigo);
-    cargaLembretes = CARGA_ERRO;
   }
   vTaskDelete(nullptr);
 }
@@ -587,20 +601,22 @@ static void carregaLembretes() {
 }
 
 static void tarefaMarcaFeito(void*) {
-  for (int i = 0; i < 300 && (consultando || enviando); i++) vTaskDelay(pdMS_TO_TICKS(50));  // uma conexão por vez (até 15 s)
-  int id = marcandoId;
-  WiFiClientSecure seguro;
-  HTTPClient http;
-  comecaHttp(http, seguro, "/marcar-feito.php");
-  http.addHeader("Content-Type", "application/json");
-  http.addHeader("X-Api-Token", PATO_TOKEN);
-  http.setTimeout(10000);
-  int codigo = http.POST(String("{\"lembrete_id\":") + id + "}");
-  String corpo = codigo > 0 ? http.getString() : "";
-  http.end();
-  Serial.printf("LOG POST /marcar-feito.php %d -> %d %s\n", id, codigo, corpo.c_str());
-  if (codigo == 200) marcadoOkId = id;
-  marcandoId = 0;
+  {  // escopo próprio: destrói HTTPClient/WiFiClientSecure ANTES do vTaskDelete (senão vaza ~50 KB)
+    for (int i = 0; i < 300 && (consultando || enviando); i++) vTaskDelay(pdMS_TO_TICKS(50));  // uma conexão por vez (até 15 s)
+    int id = marcandoId;
+    WiFiClientSecure seguro;
+    HTTPClient http;
+    comecaHttp(http, seguro, "/marcar-feito.php");
+    http.addHeader("Content-Type", "application/json");
+    http.addHeader("X-Api-Token", PATO_TOKEN);
+    http.setTimeout(10000);
+    int codigo = http.POST(String("{\"lembrete_id\":") + id + "}");
+    String corpo = codigo > 0 ? http.getString() : "";
+    http.end();
+    Serial.printf("LOG POST /marcar-feito.php %d -> %d %s\n", id, codigo, corpo.c_str());
+    if (codigo == 200) marcadoOkId = id;
+    marcandoId = 0;
+  }
   vTaskDelete(nullptr);
 }
 
@@ -617,51 +633,90 @@ static void abreTela(Tela t) {
 }
 
 // ---------- massagem cardíaca (pato morto) ----------
-// 30 chacoalhadas no ritmo de 100-120 por minuto (intervalo 500-600 ms).
-// Batida fora da janela zera a contagem. No fim, a média tem que estar entre 100 e 120.
+// 30 chacoalhadas no ritmo de 100-120 por minuto (intervalo 500-600 ms). Toca "Stayin' Alive"
+// (103 bpm) subindo o volume pra guiar o ritmo. Rápido demais não conta; devagar demais zera.
+// No fim a média precisa estar perto de 100-120 (manda pro servidor limitado a essa faixa).
 static constexpr int MASSAGEM_BATIDAS = 30;
 static constexpr float MASSAGEM_LIMIAR_G = 0.8f;      // força mínima de uma chacoalhada
 static constexpr uint32_t BATIDA_IGNORA_MS = 380;     // picos mais próximos = mesma chacoalhada
+static constexpr uint32_t BATIDA_MIN_MS = 430;        // mais rápido que isso (~140 bpm) não conta
 static constexpr uint32_t BATIDA_MAX_MS = 750;        // mais devagar que isso = errou o ritmo
 static constexpr uint32_t MASSAGEM_PAUSA_MS = 1500;   // parou de chacoalhar
 static int batidas = 0;
 static uint32_t ultimaBatidaMs = 0;
 static uint32_t somaIntervalos = 0;
+static int intervalosContados = 0;
+
+// canais do alto-falante: música no 0, coração no 1, quacks escolhem um livre
+static constexpr int CANAL_MUSICA = 0, CANAL_CORACAO = 1;
+
+static void paraMusicaMassagem() {
+#ifdef TEM_SONS_PRIVADOS
+  M5.Speaker.stop(CANAL_MUSICA);
+#endif
+}
+
+static void somBatida(int contadas) {
+#ifdef TEM_SONS_PRIVADOS
+  if (contadas == 1) {
+    // começou: música em loop, baixinha
+    M5.Speaker.playRaw(SOM_STAYIN_ALIVE, SOM_STAYIN_ALIVE_LEN, SOM_SAMPLE_RATE, false, ~0u, CANAL_MUSICA, true);
+  }
+  // volume da música sobe com as batidas
+  M5.Speaker.setChannelVolume(CANAL_MUSICA, 50 + contadas * 205 / MASSAGEM_BATIDAS);
+  M5.Speaker.playRaw(SOM_CORACAO, SOM_CORACAO_LEN, SOM_SAMPLE_RATE, false, 1, CANAL_CORACAO, true);
+#endif
+}
+
+static void zeraMassagem() {
+  batidas = 0;
+  somaIntervalos = 0;
+  intervalosContados = 0;
+  paraMusicaMassagem();
+}
 
 static void batidaMassagem(uint32_t agora) {
   uint32_t intervalo = agora - ultimaBatidaMs;
+  ultimaBatidaMs = agora;
   if (batidas == 0 || intervalo > MASSAGEM_PAUSA_MS) {
     batidas = 1;  // começou
     somaIntervalos = 0;
+    intervalosContados = 0;
     luzFlash(255, 255, 255);
+  } else if (intervalo < BATIDA_MIN_MS) {
+    luzFlash(255, 160, 0);  // rápido demais: não conta (a música ajuda a desacelerar)
+    vibra(VIBRA_CURTA);
+    return;
   } else if (intervalo > BATIDA_MAX_MS) {
-    batidas = 1;  // devagar demais: recomeça
+    batidas = 1;  // devagar demais: recomeça (a música continua)
     somaIntervalos = 0;
+    intervalosContados = 0;
     luzFlash(255, 0, 0, 400);
     vibra(VIBRA_DUPLA);
     Serial.printf("LOG massagem: devagar demais (%ums), recomeça\n", intervalo);
   } else {
     batidas++;
     somaIntervalos += intervalo;
+    intervalosContados++;
     bool noRitmo = intervalo >= 500 && intervalo <= 600;
     if (noRitmo) luzFlash(0, 255, 0);
     else luzFlash(255, 160, 0);  // perto, mas fora dos 100-120
   }
-  ultimaBatidaMs = agora;
   vibra(VIBRA_CURTA);
+  somBatida(batidas);
 
   if (batidas >= MASSAGEM_BATIDAS) {
-    float bpm = 60000.0f * (batidas - 1) / somaIntervalos;
+    float bpm = intervalosContados ? 60000.0f * intervalosContados / somaIntervalos : 0;
     Serial.printf("LOG massagem: %d batidas, %.1f bpm\n", batidas, bpm);
-    batidas = 0;
-    if (bpm < 100 || bpm > 120) {
-      // ritmo médio errado: não adianta mandar
+    zeraMassagem();
+    if (bpm < 95 || bpm > 125) {
+      // ritmo médio muito fora: não adianta mandar
       luzFlash(255, 0, 0, 600);
       vibra(VIBRA_DUPLA);
       return;
     }
     massagemBatidas = MASSAGEM_BATIDAS;
-    massagemBpm = bpm;
+    massagemBpm = bpm < 100 ? 100 : (bpm > 120 ? 120 : bpm);
     comecaEnvio(ENVIO_MASSAGEM);
   }
 }
@@ -823,13 +878,26 @@ static void desenhaPainelDebug() {
 // massagem, bateria fraca (a lápide com as mortes fica só na tela do coração)
 static void desenhaExtrasPato() {
 
-  if (estadoBase == ANIM_MORTO && batidas > 0) {
-    // coração que pulsa a cada chacoalhada + barra de progresso das 30 batidas
-    bool pulso = millis() - ultimaBatidaMs < 150;
-    desenhaIcone(ICONE_CORACAO, SCREEN_W / 2, 40, pulso ? 5 : 4);
-    int largura = SCREEN_W - 80, x0 = 40, y0 = 80;
-    canvas.drawRect(x0, y0, largura, 10, TFT_BLACK);
-    canvas.fillRect(x0 + 2, y0 + 2, (largura - 4) * batidas / MASSAGEM_BATIDAS, 6, COR_REC);
+  // pato morto: acima dele (o sprite do morto começa em y~82)
+  if (estadoBase == ANIM_MORTO && !gravando && !enviando) {
+    if (batidas > 0) {
+      // coração que pulsa a cada chacoalhada + barra de progresso das 30 batidas
+      bool pulso = millis() - ultimaBatidaMs < 150;
+      desenhaIcone(ICONE_CORACAO, SCREEN_W / 2, 20, pulso ? 3 : 2);
+      int largura = SCREEN_W - 80, x0 = 40, y0 = 42;
+      canvas.drawRect(x0, y0, largura, 10, TFT_BLACK);
+      canvas.fillRect(x0 + 2, y0 + 2, (largura - 4) * batidas / MASSAGEM_BATIDAS, 6, COR_REC);
+    } else {
+      // dica: coração pulando + texto
+      int pulo = (int)(4 * sinf(millis() / 160.0f));
+      desenhaIcone(ICONE_CORACAO, SCREEN_W / 2, 20 + pulo, 2);
+      canvas.setFont(&fonts::efontJA_16);
+      canvas.setTextSize(1);
+      canvas.setTextColor(COR_TEXTO);
+      canvas.setTextDatum(middle_center);
+      canvas.drawString("faça massagem cardíaca!", SCREEN_W / 2, 52);
+      canvas.setFont(&fonts::Font0);
+    }
   }
 
   int bateria = M5.Power.getBatteryLevel();
@@ -1193,10 +1261,11 @@ void loop() {
     }
     // parou de chacoalhar: zera a massagem
     if (batidas > 0 && agora - ultimaBatidaMs > MASSAGEM_PAUSA_MS) {
-      batidas = 0;
+      zeraMassagem();
       mudou = true;
     }
     if (batidas > 0 && agora - ultimaBatidaMs < 200) mudou = true;  // coração pulsando
+    if (estadoBase == ANIM_MORTO && batidas == 0 && tela == TELA_PATO && agora % 60 < 15) mudou = true;  // coração pulando
   }
 
   // ---- economia de bateria: tela fraca quando ninguém mexe ----

@@ -1,3 +1,7 @@
 firmware/.pio/
 .DS_Store
 firmware/include/config.h
+# sons com direitos autorais / licença incerta: ficam só na máquina local
+assets/sons-privados/
+firmware/src/sons_privados_data.cpp
+firmware/include/sons_privados.h
