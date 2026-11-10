@@ -45,6 +45,23 @@ function alexa_funeral(string $obituario, int $timeout = 4): void {
     @file_get_contents($url, false, $ctx);
 }
 
+/**
+ * Rate-limita anúncios pela Alexa por "canal" (ex: 'voto', 'passando_mal', etc).
+ * Retorna true se pode falar, false se ainda está dentro do cooldown.
+ * Atualiza o timestamp do ultimo anuncio no sucesso.
+ */
+function alexa_pode_falar(string $canal, int $cooldown_s = 10): bool {
+    $arq = sys_get_temp_dir() . "/alexa_last_$canal";
+    if (is_file($arq)) {
+        $last = (int) file_get_contents($arq);
+        if ((time() - $last) < $cooldown_s) {
+            return false;
+        }
+    }
+    file_put_contents($arq, (string) time());
+    return true;
+}
+
 function _vm_call(string $endpoint, string $device, string $texto, int $timeout): void {
     $token = env('VOICEMONKEY_TOKEN', '');
     if ($token === '' || $device === '') return;

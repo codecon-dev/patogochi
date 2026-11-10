@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../src/http.php';
 require_once __DIR__ . '/../src/db.php';
 require_once __DIR__ . '/../src/env.php';
+require_once __DIR__ . '/../src/alexa.php';
 
 require_method('POST');
 
@@ -62,11 +63,27 @@ $q = $pdo->prepare('
 ');
 $q->execute(['i' => $ideia_id]);
 $r = $q->fetch();
+$score = (int) $r['score'];
+
+// Alexa anuncia (max 1 a cada 10s). Pega texto+tipo da ideia pra dar contexto.
+if ($valor !== 0 && alexa_pode_falar('voto', 10)) {
+    $q = $pdo->prepare('select texto, tipo from ideias where id = :i');
+    $q->execute(['i' => $ideia_id]);
+    $ideia = $q->fetch();
+    if ($ideia) {
+        $direcao = $valor > 0 ? 'pra cima' : 'pra baixo';
+        $texto_curto = mb_substr($ideia['texto'], 0, 80);
+        alexa_fala_sarcastica(
+            "O usuario $username acabou de votar $direcao na ideia: \"$texto_curto\" (tipo $ideia[tipo]). Score agora: $score. Anuncie isso com sarcasmo em uma frase curta.",
+            "$username votou $direcao. Score: $score."
+        );
+    }
+}
 
 json_out([
     'ok'          => true,
     'ideia_id'    => $ideia_id,
     'meu_voto'    => $valor,
-    'score'       => (int) $r['score'],
+    'score'       => $score,
     'total_votos' => (int) $r['total'],
 ]);

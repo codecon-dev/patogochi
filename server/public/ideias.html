@@ -170,7 +170,18 @@
   .voto button:active { transform: translateY(1px); }
   .voto button.ativo.up   { background: var(--up); color: #000; border-color: var(--up); }
   .voto button.ativo.down { background: var(--down); color: #000; border-color: var(--down); }
-  .voto .score { font-size: 14px; color: var(--accent); min-width: 32px; text-align: center; }
+  .voto .score {
+    font-size: 14px;
+    color: var(--accent);
+    min-width: 32px;
+    text-align: center;
+    transition: transform 0.2s, color 0.2s;
+  }
+  .voto .score.piscou {
+    transform: scale(1.4);
+    color: #fff;
+    text-shadow: 0 0 8px var(--accent);
+  }
 
   .modal {
     position: fixed;
@@ -389,7 +400,7 @@ function renderFeed(ideias) {
   }
   vazio.style.display = 'none';
   feed.innerHTML = ideias.map(i => `
-    <div class="ideia" data-id="${i.id}">
+    <div class="ideia" data-id="${i.id}" data-score="${i.score}">
       <div class="icone" title="${NOMES[i.tipo]||i.tipo}">
         ${SPRITES[i.tipo]
           ? `<img src="${SPRITES[i.tipo]}" alt="${NOMES[i.tipo]||''}">`
@@ -418,9 +429,24 @@ function renderFeed(ideias) {
       const ideia_id = parseInt(card.dataset.id);
       const valor_clicado = parseInt(btn.dataset.valor);
       const ja_ativo = btn.classList.contains('ativo');
-      const voto_final = ja_ativo ? 0 : valor_clicado;  // clicou de novo = desfaz
+      const voto_final = ja_ativo ? 0 : valor_clicado;
 
-      btn.disabled = true;
+      // Trava polling pra este card durante o voto (evita flicker)
+      const idStr = String(ideia_id);
+      votosEmAndamento.add(idStr);
+
+      // Optimistic UI: score e botao atualizam antes do server responder
+      const scoreEl = card.querySelector('.score');
+      const scoreAtual = parseInt(scoreEl.textContent) || 0;
+      const delta = voto_final - (ja_ativo ? valor_clicado : 0);
+      const scoreOtimista = scoreAtual + delta;
+      scoreEl.textContent = (scoreOtimista>0?'+':'') + scoreOtimista;
+      scoreEl.classList.add('piscou');
+      setTimeout(() => scoreEl.classList.remove('piscou'), 500);
+
+      card.querySelectorAll('.voto button').forEach(b => b.classList.remove('ativo'));
+      if (voto_final !== 0) btn.classList.add('ativo');
+
       try {
         const r = await fetch('/voto.php', {
           method: 'POST',
@@ -429,21 +455,70 @@ function renderFeed(ideias) {
         });
         const data = await r.json();
         if (data.ok) {
-          card.querySelector('.score').textContent = (data.score>0?'+':'') + data.score;
-          card.querySelectorAll('.voto button').forEach(b => b.classList.remove('ativo'));
-          if (voto_final !== 0) btn.classList.add('ativo');
+          // Corrige pro valor real do server
+          scoreEl.textContent = (data.score>0?'+':'') + data.score;
         }
-      } finally {
-        btn.disabled = false;
+      } catch (e) { /* silencia */ }
+      finally {
+        // Libera polling depois de 3s (tempo pro proximo scores.php ja ver o voto)
+        setTimeout(() => votosEmAndamento.delete(idStr), 3000);
       }
     };
   });
 }
 
+// Guarda IDs com voto local em andamento (nao sobrescrever durante polling)
+const votosEmAndamento = new Set();
+
+// Atualiza SO os scores das ideias ja renderizadas (rapido, sem re-render).
+// Se detectar mudança que rompe a ordem, reordena os cards in-place.
+async function atualizarScores() {
+  const cards = document.querySelectorAll('.ideia[data-id]');
+  if (cards.length === 0) return;
+  const ids = [...cards].map(c => c.dataset.id).join(',');
+  const q = username ? `&username=${encodeURIComponent(username)}` : '';
+  let scoreMudou = false;
+  try {
+    const r = await fetch(`/scores.php?ids=${ids}${q}`);
+    const data = await r.json();
+    for (const [id, info] of Object.entries(data.scores || {})) {
+      if (votosEmAndamento.has(id)) continue;
+      const card = document.querySelector(`.ideia[data-id="${id}"]`);
+      if (!card) continue;
+      const scoreEl = card.querySelector('.score');
+      const upBtn   = card.querySelector('.voto button.up');
+      const downBtn = card.querySelector('.voto button.down');
+      const scoreAtual = parseInt(scoreEl.textContent) || 0;
+      if (scoreAtual !== info.score) {
+        scoreEl.textContent = (info.score>0?'+':'') + info.score;
+        scoreEl.classList.add('piscou');
+        setTimeout(() => scoreEl.classList.remove('piscou'), 500);
+        card.dataset.score = info.score;
+        scoreMudou = true;
+      }
+      upBtn.classList.toggle('ativo',   info.meu_voto === 1);
+      downBtn.classList.toggle('ativo', info.meu_voto === -1);
+    }
+
+    // Reordena DOM se algum score mudou (score desc, id desc)
+    if (scoreMudou) {
+      const feed = document.getElementById('feed');
+      const ordenados = [...feed.children].sort((a, b) => {
+        const sa = parseInt(a.dataset.score) || 0;
+        const sb = parseInt(b.dataset.score) || 0;
+        if (sb !== sa) return sb - sa;
+        return parseInt(b.dataset.id) - parseInt(a.dataset.id);
+      });
+      ordenados.forEach(el => feed.appendChild(el));
+    }
+  } catch (e) { /* silencia */ }
+}
+
 // boot
 atualizarBannerUsuario();
 carregar();
-setInterval(carregar, 15000);   // refresh a cada 15s
+setInterval(atualizarScores, 2000);   // scores a cada 2s (leve)
+setInterval(carregar,        20000);  // feed completo a cada 20s (pra pegar ideias novas)
 </script>
 
 </body>

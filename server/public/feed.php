@@ -12,8 +12,18 @@ $cursor = isset($_GET['cursor']) && is_numeric($_GET['cursor']) ? (int)$_GET['cu
 $username = trim((string)($_GET['username'] ?? ''));
 
 // Lembretes (biscoito_sorte) ficam no /lembretes.php — nao aparecem no feed publico
+// Cursor compoem score + id pra manter paginacao estavel com order by score
 $where = "where i.tipo <> 'biscoito_sorte'";
-if ($cursor) $where .= ' and i.id < :cursor';
+$cursor_cond = '';
+if ($cursor) {
+    // cursor = "{score}_{id}" — carrega proximas que tenham score menor, ou mesmo score + id menor
+    $parts = explode('_', (string)($_GET['cursor'] ?? ''));
+    if (count($parts) === 2 && is_numeric($parts[0]) && is_numeric($parts[1])) {
+        $cursor_score = (int) $parts[0];
+        $cursor_id    = (int) $parts[1];
+        $cursor_cond = "having (coalesce(sum(v.valor), 0) < $cursor_score) or (coalesce(sum(v.valor), 0) = $cursor_score and i.id < $cursor_id)";
+    }
+}
 $sql = "
     select
       i.id,
@@ -27,7 +37,8 @@ $sql = "
     left join votos v on v.ideia_id = i.id
     $where
     group by i.id
-    order by i.id desc
+    $cursor_cond
+    order by score desc, i.id desc
     limit $limit
 ";
 $stmt = db()->prepare($sql);
@@ -64,9 +75,13 @@ $ideias = array_map(fn($r) => [
     'meu_voto'    => $meus_votos[(int) $r['id']] ?? 0,  // -1 | 0 | 1
 ], $rows);
 
-$proximo_cursor = count($rows) === $limit ? end($rows)['id'] : null;
+$proximo_cursor = null;
+if (count($rows) === $limit) {
+    $ultimo = end($rows);
+    $proximo_cursor = $ultimo['score'] . '_' . $ultimo['id'];
+}
 
 json_out([
-    'ideias'          => $ideias,
-    'proximo_cursor'  => $proximo_cursor !== null ? (int) $proximo_cursor : null,
+    'ideias'         => $ideias,
+    'proximo_cursor' => $proximo_cursor,
 ]);
