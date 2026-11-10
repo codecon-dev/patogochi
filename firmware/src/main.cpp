@@ -495,11 +495,11 @@ static constexpr int BRILHO_NORMAL = 160, BRILHO_DESCANSO = 40, BRILHO_NOITE = 1
 
 // ---------- noite ----------
 // Entre NOITE_INICIO e NOITE_FIM (horário de Brasília, via NTP) o pato dorme quando estaria parado.
-static constexpr int NOITE_INICIO = 0, NOITE_FIM = 7;
+static constexpr int NOITE_INICIO = 21, NOITE_FIM = 7;  // 21h às 7h
 static bool ehNoite() {
   struct tm t;
   if (!getLocalTime(&t, 0)) return false;  // ainda sem hora: considera dia
-  return t.tm_hour >= NOITE_INICIO && t.tm_hour < NOITE_FIM;
+  return t.tm_hour >= NOITE_INICIO || t.tm_hour < NOITE_FIM;  // atravessa a meia-noite
 }
 
 // o que o pato mostra quando não está fazendo nada
