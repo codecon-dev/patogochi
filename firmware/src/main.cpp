@@ -994,7 +994,8 @@ static void desenhaPainelDebug() {
 static void desenhaExtrasPato() {
 
   // pato morto: acima dele (o sprite do morto começa em y~82)
-  if (estadoBase == ANIM_MORTO && !gravando && !enviando) {
+  // só depois que o pato já está deitado morto na tela (não durante a reação que antecede)
+  if (estadoBase == ANIM_MORTO && estado == ANIM_MORTO && !gravando && !enviando) {
     if (batidas > 0) {
       // coração que pulsa a cada chacoalhada + barra de progresso das 30 batidas
       bool pulso = millis() - ultimaBatidaMs < 150;

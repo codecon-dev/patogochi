@@ -150,7 +150,7 @@ function desenhaGravando() {
 }
 
 function desenhaExtrasPato() {
-  if (ui.base === 'morto' && !ui.gravando) {
+  if (ui.base === 'morto' && estado.anim === 'morto' && !ui.gravando) {
     if (ui.batidas > 0) {
       const pulso = performance.now() - ultimaBatida < 150;
       desenhaIcone(icones.CORACAO, W / 2, 20, pulso ? 3 : 2);
