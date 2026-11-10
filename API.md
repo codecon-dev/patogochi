@@ -26,6 +26,8 @@ Com `X-Api-Token`. Lembretes **pendentes** (não feitos), vencidos primeiro:
 ] }
 ```
 
-## Ainda não usado
+## Reviver (`POST /reviver.php`)
 
-- `POST /reviver.php` (desculpa e massagem cardíaca)
+- **Massagem:** JSON `{"metodo":"massagem","batidas":30,"bpm":110.4}` depois de 30 chacoalhadas com média entre 100 e 120 bpm.
+- **Desculpa (pedido):** multipart igual ao `/ideia.php` + campo `metodo=desculpa` + `audio` (WAV). Hoje a API só aceita `texto`; o firmware já manda áudio.
+- Resposta `{"ok":true,...}` → pato revive empolgado. `{"ok":false}` → pato debocha e continua morto.

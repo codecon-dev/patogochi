@@ -63,8 +63,146 @@ for (const nome of FOOD_NAMES) {
 
 const COMIDA_SCALE = 12;
 
+// ícones da barra: lidos direto do firmware/include/icones.h ('k' = preto)
+const BARRA_Y = 204, ICONE_ESCALA = 2, BOTAO_X = [53, 160, 267];
+const icones = {};
+carregando.push(fetch('../../firmware/include/icones.h').then(r => r.text()).then(txt => {
+  for (const m of txt.matchAll(/ICONE_(\w+)\[ICONE_TAM\]\s*=\s*\{([^}]*)\}/g))
+    icones[m[1]] = [...m[2].matchAll(/"([^"]*)"/g)].map(x => x[1]);
+}).catch(() => console.warn('falhou icones.h')));
+
+function desenhaIcone(icone, cx, cy, escala) {
+  if (!icone) return;
+  const n = icone.length, x0 = cx - n * escala / 2, y0 = cy - n * escala / 2;
+  ctx.fillStyle = '#000';
+  icone.forEach((linha, j) => [...linha].forEach((c, i) => {
+    if (c === 'k') ctx.fillRect(x0 + i * escala, y0 + j * escala, escala, escala);
+  }));
+}
+
 let estado = { anim: 'parado', frame: 0, cocos: 0, frameCoco: 0, comida: null, revelando: false };
+// UI tela gravando decimos arraste mortes hp batidas bateriaFraca cursor carga base
+let ui = { tela: 0, gravando: false, decimos: 0, arraste: 0, mortes: 0, hp: -1, batidas: 0,
+           bateriaFraca: false, cursor: 0, carga: 0, base: 'parado' };
+let lista = [];          // [{id, feito, vencido, marcando, prazo, texto}]
+let listaNova = null;    // sendo recebida
+let listaFaltam = 0;
+let ultimaBatida = 0, batidasAntes = 0;
 let fundo = 0;
+
+const TELA_PATO = 0, TELA_TAREFAS = 1, TELA_STATUS = 2;
+const COR_TEXTO = '#202020', COR_REC = '#ff0000';
+const MASSAGEM_BATIDAS = 30;
+const fonte = (px) => `${px}px system-ui, sans-serif`;
+
+function texto(t, x, y, cor, px, align = 'left') {
+  ctx.fillStyle = cor; ctx.font = fonte(px); ctx.textAlign = align; ctx.textBaseline = 'middle';
+  ctx.fillText(t, x, y);
+}
+
+// mesmas formas do firmware (desenhaSetaBaixo / desenhaCheck)
+function setaBaixo(cx, cy) {
+  ctx.fillStyle = '#000';
+  ctx.beginPath(); ctx.moveTo(cx, cy + 10); ctx.lineTo(cx - 8, cy + 2); ctx.lineTo(cx + 8, cy + 2); ctx.fill();
+  ctx.fillRect(cx - 3, cy - 10, 6, 13);
+}
+function check(cx, cy, cor) {
+  ctx.strokeStyle = cor; ctx.lineWidth = 5; ctx.lineCap = 'butt';
+  ctx.beginPath(); ctx.moveTo(cx - 11, cy); ctx.lineTo(cx - 4, cy + 7); ctx.lineTo(cx + 11, cy - 8); ctx.stroke();
+}
+
+// contorno = só a borda (coração vazio do status)
+function desenhaIconeContorno(icone, cx, cy, escala) {
+  if (!icone) return;
+  const n = icone.length, x0 = cx - n * escala / 2, y0 = cy - n * escala / 2;
+  const cheio = (i, j) => j >= 0 && j < n && i >= 0 && i < n && icone[j][i] === 'k';
+  ctx.fillStyle = '#000';
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+    if (!cheio(i, j)) continue;
+    if (cheio(i - 1, j) && cheio(i + 1, j) && cheio(i, j - 1) && cheio(i, j + 1)) continue;
+    ctx.fillRect(x0 + i * escala, y0 + j * escala, escala, escala);
+  }
+}
+
+function desenhaBarra() {
+  const cy = BARRA_Y + 18;
+  if (ui.tela === TELA_PATO) {
+    desenhaIcone(icones.TAREFAS, BOTAO_X[0], cy, ICONE_ESCALA);
+    desenhaIcone(icones.CORACAO, BOTAO_X[1], cy, ICONE_ESCALA);
+    desenhaIcone(icones.MICROFONE, BOTAO_X[2], cy, ICONE_ESCALA);
+  } else {
+    desenhaIcone(icones.VOLTAR, BOTAO_X[0], cy, ICONE_ESCALA);
+    if (ui.tela === TELA_TAREFAS && lista.length) { setaBaixo(BOTAO_X[1], cy); check(BOTAO_X[2], cy, '#000'); }
+  }
+}
+
+function desenhaGravando() {
+  const cy = BARRA_Y + 18;
+  let bx = Math.min(BOTAO_X[2] + ui.arraste / 2, W - 10);
+  ctx.fillStyle = ctx.strokeStyle = COR_REC;
+  if (Math.abs(ui.arraste) > 50) {
+    ctx.lineWidth = 3; ctx.beginPath();
+    ctx.moveTo(bx - 8, cy - 8); ctx.lineTo(bx + 8, cy + 8); ctx.moveTo(bx - 8, cy + 8); ctx.lineTo(bx + 8, cy - 8);
+    ctx.stroke();
+  } else if (Math.floor(performance.now() / 400) % 2) {
+    ctx.beginPath(); ctx.arc(bx, cy, 8, 0, Math.PI * 2); ctx.fill();
+  }
+  texto((ui.decimos / 10).toFixed(1) + 's', BOTAO_X[1], cy, COR_TEXTO, 16, 'center');
+}
+
+function desenhaExtrasPato() {
+  if (ui.mortes > 0 && imgs.lapide) {
+    ctx.drawImage(imgs.lapide[0], 4, 4, 32, 32);
+    texto(String(ui.mortes), 20, 21, '#fff', 9, 'center');
+  }
+  if (ui.base === 'morto' && ui.batidas > 0) {
+    const pulso = performance.now() - ultimaBatida < 150;
+    desenhaIcone(icones.CORACAO, W / 2, 40, pulso ? 5 : 4);
+    ctx.strokeStyle = '#000'; ctx.lineWidth = 1; ctx.strokeRect(40.5, 80.5, W - 81, 9);
+    ctx.fillStyle = COR_REC; ctx.fillRect(42, 82, (W - 84) * ui.batidas / MASSAGEM_BATIDAS, 6);
+  }
+  if (ui.bateriaFraca && Math.floor(performance.now() / 700) % 2) {
+    const bx = W - 34, by = 6;
+    ctx.strokeStyle = '#000'; ctx.lineWidth = 1; ctx.strokeRect(bx + .5, by + .5, 23, 11);
+    ctx.fillStyle = '#000'; ctx.fillRect(bx + 24, by + 3, 3, 6);
+    ctx.fillStyle = COR_REC; ctx.fillRect(bx + 2, by + 2, 4, 8);
+  }
+}
+
+function desenhaTarefas() {
+  if (ui.carga === 1) return texto('carregando...', W / 2, 100, COR_TEXTO, 16, 'center');
+  if (ui.carga === 3) return texto('erro', W / 2, 100, COR_TEXTO, 16, 'center');
+  if (!lista.length) return texto('nenhuma tarefa \\o/', W / 2, 100, COR_TEXTO, 16, 'center');
+  const VISIVEIS = 6, ALT = 32, Y0 = 8;
+  const primeiro = Math.max(0, ui.cursor - VISIVEIS + 1);
+  for (let k = 0; k < VISIVEIS && primeiro + k < lista.length; k++) {
+    const i = primeiro + k, y = Y0 + k * ALT, l = lista[i];
+    if (i === ui.cursor) { ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.roundRect(4, y, W - 8, ALT - 4, 6); ctx.fill(); }
+    const bx = 12, by = y + 4;
+    ctx.strokeStyle = COR_TEXTO; ctx.lineWidth = 2; ctx.strokeRect(bx + 1, by + 1, 18, 18);
+    if (l.feito) check(bx + 10, by + 9, '#00bc00');
+    else if (l.marcando && Math.floor(performance.now() / 250) % 2) { ctx.fillStyle = '#aaa'; ctx.fillRect(bx + 5, by + 5, 10, 10); }
+    ctx.font = fonte(16);
+    const prazo = l.prazo === '-' ? '' : l.prazo;
+    const largPrazo = prazo ? ctx.measureText(prazo).width + 8 : 0;
+    let t = l.texto;
+    while (t.length > 1 && ctx.measureText(t).width > W - 50 - largPrazo) t = t.slice(0, -1);
+    if (t.length < l.texto.length) t += '…';
+    texto(t, 40, y + 14, l.feito ? '#7b7b7b' : COR_TEXTO, 16);
+    if (prazo) texto(prazo, W - 12, y + 14, l.vencido && !l.feito ? '#c80000' : COR_TEXTO, 16, 'right');
+    if (l.feito) { ctx.fillStyle = '#7b7b7b'; ctx.font = fonte(16); ctx.fillRect(40, y + 14, ctx.measureText(t).width, 1); }
+  }
+}
+
+function desenhaStatus() {
+  const cheios = ui.hp < 0 ? 0 : Math.floor((ui.hp + 19) / 20);
+  for (let i = 0; i < 5; i++) {
+    if (i < cheios) desenhaIcone(icones.CORACAO, 48 + i * 56, 52, 3);
+    else desenhaIconeContorno(icones.CORACAO, 48 + i * 56, 52, 3);
+  }
+  if (imgs.lapide) ctx.drawImage(imgs.lapide[0], (W - 96) / 2, 92, 96, 96);
+  texto(String(ui.mortes), W / 2, 92 + 45, '#fff', 24, 'center');
+}
 
 function desenha() {
   ctx.clearRect(0, 0, W, H);
@@ -79,25 +217,49 @@ function desenha() {
     ctx.drawImage(ci, (W - w) / 2, (H - w) / 2, w, w);
     return;
   }
-  const frames = imgs[estado.anim];
-  if (frames) {
-    const img = frames[estado.frame % frames.length];
-    ctx.drawImage(img, DUCK_X, DUCK_Y, 32 * DUCK_SCALE, 32 * DUCK_SCALE);
+  if (ui.tela === TELA_TAREFAS) desenhaTarefas();
+  else if (ui.tela === TELA_STATUS) desenhaStatus();
+  else {
+    const frames = imgs[estado.anim];
+    if (frames) ctx.drawImage(frames[estado.frame % frames.length], DUCK_X, DUCK_Y, 32 * DUCK_SCALE, 32 * DUCK_SCALE);
   }
-
-  for (let i = 0; i < estado.cocos && i < COCO_X.length; i++) {
-    const img = imgs.coco[(estado.frameCoco + i * 3) % imgs.coco.length];
-    ctx.drawImage(img, COCO_X[i], GROUND_Y - COCO_H * COCO_SCALE + 4, COCO_W * COCO_SCALE, COCO_H * COCO_SCALE);
+  if (!ui.gravando) desenhaBarra();
+  if (ui.tela === TELA_PATO) {
+    desenhaExtrasPato();
+    for (let i = 0; i < estado.cocos && i < COCO_X.length; i++) {
+      const img = imgs.coco[(estado.frameCoco + i * 3) % imgs.coco.length];
+      ctx.drawImage(img, COCO_X[i], GROUND_Y - COCO_H * COCO_SCALE + 4, COCO_W * COCO_SCALE, COCO_H * COCO_SCALE);
+    }
   }
+  if (ui.gravando) desenhaGravando();
 }
 
-// linha do firmware: "PATO <anim> <frame> <cocos> <frameCoco>"
+// linhas do firmware (enviaEspelho em main.cpp):
+//   PATO <anim> <frame> <cocos> <frameCoco> <comida> <revelando>
+//   UI <tela> <gravando> <decimos> <arraste> <mortes> <hp> <batidas> <bateriaFraca> <cursor> <carga> <base>
+//   LISTA <n>  seguido de n linhas  L <id> <feito> <vencido> <marcando> <prazo|-> <texto...>
 function processaLinha(linha) {
-  const p = linha.trim().split(' ');
-  if (p[0] !== 'PATO' || p.length < 5) return;
-  estado = { anim: p[1], frame: +p[2], cocos: +p[3], frameCoco: +p[4], comida: p[5] || null, revelando: p[6] === '1' };
-  statusEl.textContent = `conectado · ${estado.anim} frame ${estado.frame} · ${estado.cocos} cocô(s)`;
-  desenha();
+  linha = linha.replace(/\r$/, '');
+  const p = linha.split(' ');
+  if (p[0] === 'PATO' && p.length >= 5) {
+    estado = { anim: p[1], frame: +p[2], cocos: +p[3], frameCoco: +p[4], comida: p[5] || null, revelando: p[6] === '1' };
+    statusEl.textContent = `conectado · ${estado.anim} frame ${estado.frame} · ${estado.cocos} cocô(s)`;
+    desenha();
+  } else if (p[0] === 'UI' && p.length >= 12) {
+    const batidas = +p[7];
+    if (batidas !== batidasAntes && batidas > 0) ultimaBatida = performance.now();
+    batidasAntes = batidas;
+    ui = { tela: +p[1], gravando: p[2] === '1', decimos: +p[3], arraste: +p[4], mortes: +p[5], hp: +p[6],
+           batidas, bateriaFraca: p[8] === '1', cursor: +p[9], carga: +p[10], base: p[11] };
+    desenha();
+  } else if (p[0] === 'LISTA') {
+    listaFaltam = +p[1]; listaNova = [];
+    if (!listaFaltam) { lista = []; listaNova = null; desenha(); }
+  } else if (p[0] === 'L' && listaNova) {
+    listaNova.push({ id: +p[1], feito: p[2] === '1', vencido: p[3] === '1', marcando: p[4] === '1',
+                     prazo: p[5], texto: p.slice(6).join(' ') });
+    if (--listaFaltam <= 0) { lista = listaNova; listaNova = null; desenha(); }
+  }
 }
 
 let porta = null;

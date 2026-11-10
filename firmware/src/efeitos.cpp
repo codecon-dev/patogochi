@@ -38,6 +38,15 @@ void luz(Luz l) {
   ultimoLedMs = 0;  // redesenha já no próximo atualiza
 }
 
+static uint32_t flashAteMs = 0;
+static uint32_t flashCor = 0;
+
+void luzFlash(uint8_t r, uint8_t g, uint8_t b, uint16_t ms) {
+  flashCor = barra.Color(r, g, b);
+  flashAteMs = millis() + ms;
+  ultimoLedMs = 0;
+}
+
 void vibra(Vibra v) {
   padrao = PADROES[v];
   passo = 0;
@@ -52,6 +61,11 @@ static uint8_t pulso(uint32_t agora, uint32_t periodo) {
 }
 
 static void desenhaLuz(uint32_t agora) {
+  if ((int32_t)(flashAteMs - agora) > 0) {
+    barra.fill(flashCor);
+    barra.show();
+    return;
+  }
   switch (luzAtual) {
     case LUZ_APAGADA:
       barra.clear();

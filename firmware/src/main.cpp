@@ -6,6 +6,7 @@
 // Toque no pato = quack. Segurar no pato 10 s = painel de debug.
 #include <M5Unified.h>
 #include <WiFi.h>
+#include <WiFiMulti.h>
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
@@ -172,7 +173,7 @@ static constexpr size_t MIN_AMOSTRAS = TAXA_MIC / 2;       // menos de 0,5 s = i
 // O áudio sobe como multipart/form-data: o buffer tem folga antes e depois do WAV
 // pra montar o corpo inteiro sem copiar as amostras.
 static const char* LIMITE = "----patogochiQuackQuack";
-static constexpr size_t FOLGA = 256;
+static constexpr size_t FOLGA = 512;
 static uint8_t* buffer = nullptr;                          // FOLGA + WAV + FOLGA
 static uint8_t* wav = nullptr;                             // cabeçalho (44 bytes) + amostras
 static int16_t* amostras = nullptr;
@@ -238,7 +239,19 @@ static bool terminaGravacao() {
   return gravadas >= MIN_AMOSTRAS;
 }
 
+// ---------- estado do pato que vem do servidor (preenchido pela consulta de estado) ----------
+static Anim estadoBase = ANIM_PARADO;
+static int hp = -1, mortes = 0, versaoServidor = -1;
+
 // ---------- envio pro servidor (roda numa tarefa separada pra animação não travar) ----------
+// O mesmo envio serve pra ideia (POST /ideia.php) e pra reviver (POST /reviver.php):
+//   pato vivo  + gravação  -> ideia
+//   pato morto + gravação  -> desculpa (áudio)
+//   pato morto + chacoalhar 30x no ritmo -> massagem cardíaca
+enum ModoEnvio { ENVIO_IDEIA, ENVIO_DESCULPA, ENVIO_MASSAGEM };
+static volatile ModoEnvio modoEnvio = ENVIO_IDEIA;
+static int massagemBatidas = 0;
+static float massagemBpm = 0;
 // API: https://patogochi.codegus.com/docs.html
 struct Resposta {
   bool ok = false;
@@ -246,6 +259,8 @@ struct Resposta {
   int codigo = 0;
   int comida = -1;                 // índice em FOODS, -1 = nenhuma
   Anim reacao = ANIM_EMPOLGADO;
+  bool reviveu = false;            // só pro reviver
+  int hp = -1, mortes = -1;
 };
 static Resposta resposta;
 static volatile bool enviando = false;
@@ -276,12 +291,17 @@ static void comecaHttp(HTTPClient& http, WiFiClientSecure& seguro, const String&
 }
 
 // Monta o corpo multipart em volta do WAV. Devolve início e tamanho.
-static uint8_t* montaMultipart(size_t& tamanho) {
+static uint8_t* montaMultipart(size_t& tamanho, bool desculpa) {
   char antes[FOLGA], depois[64];
+  char metodo[128] = "";
+  if (desculpa) {
+    snprintf(metodo, sizeof(metodo),
+             "--%s\r\nContent-Disposition: form-data; name=\"metodo\"\r\n\r\ndesculpa\r\n", LIMITE);
+  }
   int nAntes = snprintf(antes, sizeof(antes),
-      "--%s\r\nContent-Disposition: form-data; name=\"origem\"\r\n\r\ncore2\r\n"
+      "%s--%s\r\nContent-Disposition: form-data; name=\"origem\"\r\n\r\ncore2\r\n"
       "--%s\r\nContent-Disposition: form-data; name=\"audio\"; filename=\"ideia.wav\"\r\n"
-      "Content-Type: audio/wav\r\n\r\n", LIMITE, LIMITE);
+      "Content-Type: audio/wav\r\n\r\n", metodo, LIMITE, LIMITE);
   int nDepois = snprintf(depois, sizeof(depois), "\r\n--%s--\r\n", LIMITE);
   size_t nWav = 44 + gravadas * 2;
   uint8_t* inicio = wav - nAntes;
@@ -308,28 +328,42 @@ static void tarefaEnvio(void*) {
     // senão o destrutor do HTTPClient usa um cliente que já morreu (crash)
     WiFiClientSecure seguro;
     HTTPClient http;
-    comecaHttp(http, seguro, "/ideia.php");
-    http.addHeader("Content-Type", String("multipart/form-data; boundary=") + LIMITE);
+    ModoEnvio modo = modoEnvio;
+    const char* caminho = modo == ENVIO_IDEIA ? "/ideia.php" : "/reviver.php";
+    comecaHttp(http, seguro, caminho);
     http.addHeader("X-Api-Token", PATO_TOKEN);
-    http.setTimeout(60000);  // transcrição + Claude podem demorar (hoje leva 33-41 s)
-    size_t tamanho;
-    uint8_t* corpoEnvio = montaMultipart(tamanho);
-    int codigo = http.POST(corpoEnvio, tamanho);
+    int codigo;
+    if (modo == ENVIO_MASSAGEM) {
+      http.addHeader("Content-Type", "application/json");
+      http.setTimeout(15000);
+      codigo = http.POST(String("{\"metodo\":\"massagem\",\"batidas\":") + massagemBatidas +
+                         ",\"bpm\":" + String(massagemBpm, 1) + "}");
+    } else {
+      http.addHeader("Content-Type", String("multipart/form-data; boundary=") + LIMITE);
+      http.setTimeout(60000);  // transcrição + Claude podem demorar (hoje leva 33-41 s)
+      size_t tamanho;
+      uint8_t* corpoEnvio = montaMultipart(tamanho, modo == ENVIO_DESCULPA);
+      codigo = http.POST(corpoEnvio, tamanho);
+    }
     String corpo = codigo > 0 ? http.getString() : "";
     http.end();
-    Serial.printf("LOG POST /ideia.php -> %d %s\n", codigo, corpo.c_str());
+    Serial.printf("LOG POST %s -> %d %s\n", caminho, codigo, corpo.c_str());
     r.codigo = codigo;
     r.corpo = corpo;
 
     JsonDocument doc;
     bool jsonOk = !deserializeJson(doc, corpo);
-    if (codigo == 200 && jsonOk) {
+    if (codigo == 200 && jsonOk && modo == ENVIO_IDEIA) {
       r.ok = true;
       r.comida = indiceComida(doc["tipo"]);
       r.reacao = animPorNome(doc["estado"], ANIM_EMPOLGADO);
-
+    } else if (codigo == 200 && jsonOk) {
+      r.ok = true;
+      r.reviveu = doc["ok"] | false;
+      r.hp = doc["hp"] | -1;
+      r.mortes = doc["mortes"] | -1;
     } else if (codigo == 409) {
-      r.erro = "pato morto (409)";
+      r.erro = modo == ENVIO_IDEIA ? "pato morto (409)" : "pato ja ta vivo (409)";
     } else if (codigo <= 0) {
       r.erro = "servidor não respondeu";
     } else {
@@ -347,14 +381,20 @@ static void tarefaEnvio(void*) {
   vTaskDelete(nullptr);
 }
 
-static void enviaIdeia() {
-  escreveCabecalhoWav(gravadas);
+static void comecaEnvio(ModoEnvio modo) {
+  modoEnvio = modo;
   envioId++;
   envioDesdeMs = millis();
   enviando = true;
   respostaPronta = false;
-  mudaEstado(ANIM_PENSANDO, false);
+  if (modo != ENVIO_MASSAGEM) mudaEstado(ANIM_PENSANDO, false);
   xTaskCreatePinnedToCore(tarefaEnvio, "envio", 16384, nullptr, 1, nullptr, 0);
+}
+
+// gravação terminou: ideia (pato vivo) ou pedido de desculpas (pato morto)
+static void enviaGravacao() {
+  escreveCabecalhoWav(gravadas);
+  comecaEnvio(estadoBase == ANIM_MORTO ? ENVIO_DESCULPA : ENVIO_IDEIA);
 }
 
 static void trataResposta() {
@@ -366,6 +406,20 @@ static void trataResposta() {
     ultimoErro = resposta.erro;
     Serial.printf("LOG erro: %s\n", resposta.erro.c_str());
     mudaEstado(ANIM_DEBOCHANDO);
+    fimReacaoMs = millis() + REACAO_MS;
+    return;
+  }
+  if (modoEnvio != ENVIO_IDEIA) {
+    // reviver: aceitou -> pato volta empolgado; não aceitou -> debocha (continua morto)
+    if (resposta.reviveu) {
+      Serial.println("LOG pato reviveu!");
+      estadoBase = ANIM_PARADO;
+      if (resposta.hp >= 0) hp = resposta.hp;
+      if (resposta.mortes >= 0) mortes = resposta.mortes;
+      mudaEstado(ANIM_EMPOLGADO);
+    } else {
+      mudaEstado(ANIM_DEBOCHANDO);
+    }
     fimReacaoMs = millis() + REACAO_MS;
     return;
   }
@@ -386,13 +440,11 @@ static bool consultandoEstado() { return consultando; }
 // GET /estado.php a cada 2 min. O sprite que o servidor manda (parado, triste_fome, morto...)
 // vira o "estado base": é pra onde o pato volta quando não está gravando/comendo/reagindo.
 static constexpr uint32_t CONSULTA_MS = 2 * 60 * 1000;
-static Anim estadoBase = ANIM_PARADO;
-static int hp = -1, mortes = 0, versaoServidor = -1;
 static uint32_t ultimaConsultaMs = 0;
 static bool jaConsultou = false;
 static volatile bool estadoPronto = false;
 static Anim novoBase = ANIM_PARADO;
-static int novoHp = -1, novasMortes = 0, novaVersao = -1;
+static int novoHp = -1, novasMortes = 0, novaVersao = -1, novosCocos = 0;
 
 static constexpr uint32_t CONSULTA_DESISTE_MS = 30000;
 static volatile uint32_t consultaId = 0;
@@ -412,6 +464,7 @@ static void tarefaEstado(void*) {
     novoBase = animPorNome(doc["sprite"], ANIM_PARADO);
     novoHp = doc["hp"] | -1;
     novasMortes = doc["mortes"] | 0;
+    novosCocos = doc["coco"] | 0;  // lembretes vencidos pendentes
     novaVersao = doc["versao"] | -1;
     if (meuId == consultaId) estadoPronto = true;
   }
@@ -436,8 +489,26 @@ static bool ocioso() {
          estado != ANIM_COMENDO;
 }
 
+// ---------- brilho da tela ----------
+static constexpr uint32_t TELA_DESCANSA_MS = 60000;  // 1 min sem mexer -> tela fraca
+static constexpr int BRILHO_NORMAL = 160, BRILHO_DESCANSO = 40, BRILHO_NOITE = 10;
+
+// ---------- noite ----------
+// Entre NOITE_INICIO e NOITE_FIM (horário de Brasília, via NTP) o pato dorme quando estaria parado.
+static constexpr int NOITE_INICIO = 0, NOITE_FIM = 7;
+static bool ehNoite() {
+  struct tm t;
+  if (!getLocalTime(&t, 0)) return false;  // ainda sem hora: considera dia
+  return t.tm_hour >= NOITE_INICIO && t.tm_hour < NOITE_FIM;
+}
+
+// o que o pato mostra quando não está fazendo nada
+static Anim baseVisual() {
+  return estadoBase == ANIM_PARADO && ehNoite() ? ANIM_DORMINDO : estadoBase;
+}
+
 static void voltaProBase(bool comSom) {
-  mudaEstado(estadoBase, comSom);
+  mudaEstado(baseVisual(), comSom);
 }
 
 // ---------- telas ----------
@@ -538,6 +609,56 @@ static void abreTela(Tela t) {
   tela = t;
   ultimoBotaoMs = millis();
   if (t == TELA_TAREFAS) carregaLembretes();
+}
+
+// ---------- massagem cardíaca (pato morto) ----------
+// 30 chacoalhadas no ritmo de 100-120 por minuto (intervalo 500-600 ms).
+// Batida fora da janela zera a contagem. No fim, a média tem que estar entre 100 e 120.
+static constexpr int MASSAGEM_BATIDAS = 30;
+static constexpr float MASSAGEM_LIMIAR_G = 0.8f;      // força mínima de uma chacoalhada
+static constexpr uint32_t BATIDA_IGNORA_MS = 380;     // picos mais próximos = mesma chacoalhada
+static constexpr uint32_t BATIDA_MAX_MS = 750;        // mais devagar que isso = errou o ritmo
+static constexpr uint32_t MASSAGEM_PAUSA_MS = 1500;   // parou de chacoalhar
+static int batidas = 0;
+static uint32_t ultimaBatidaMs = 0;
+static uint32_t somaIntervalos = 0;
+
+static void batidaMassagem(uint32_t agora) {
+  uint32_t intervalo = agora - ultimaBatidaMs;
+  if (batidas == 0 || intervalo > MASSAGEM_PAUSA_MS) {
+    batidas = 1;  // começou
+    somaIntervalos = 0;
+    luzFlash(255, 255, 255);
+  } else if (intervalo > BATIDA_MAX_MS) {
+    batidas = 1;  // devagar demais: recomeça
+    somaIntervalos = 0;
+    luzFlash(255, 0, 0, 400);
+    vibra(VIBRA_DUPLA);
+    Serial.printf("LOG massagem: devagar demais (%ums), recomeça\n", intervalo);
+  } else {
+    batidas++;
+    somaIntervalos += intervalo;
+    bool noRitmo = intervalo >= 500 && intervalo <= 600;
+    if (noRitmo) luzFlash(0, 255, 0);
+    else luzFlash(255, 160, 0);  // perto, mas fora dos 100-120
+  }
+  ultimaBatidaMs = agora;
+  vibra(VIBRA_CURTA);
+
+  if (batidas >= MASSAGEM_BATIDAS) {
+    float bpm = 60000.0f * (batidas - 1) / somaIntervalos;
+    Serial.printf("LOG massagem: %d batidas, %.1f bpm\n", batidas, bpm);
+    batidas = 0;
+    if (bpm < 100 || bpm > 120) {
+      // ritmo médio errado: não adianta mandar
+      luzFlash(255, 0, 0, 600);
+      vibra(VIBRA_DUPLA);
+      return;
+    }
+    massagemBatidas = MASSAGEM_BATIDAS;
+    massagemBpm = bpm;
+    comecaEnvio(ENVIO_MASSAGEM);
+  }
 }
 
 // ---------- desenho ----------
@@ -679,7 +800,11 @@ static void desenhaPainelDebug() {
   linhas[n++] = "ultima resposta: " + (ultimoCodigo ? String(ultimoCodigo) : String("-"));
   linhas[n++] = "  " + ultimaResposta.substring(0, 48);
   linhas[n++] = "ultimo erro: " + (ultimoErro.length() ? ultimoErro : String("-"));
-  linhas[n++] = "bateria: " + String(M5.Power.getBatteryLevel()) + "%" + (M5.Power.isCharging() ? " (carregando)" : "");
+  struct tm agoraTm;
+  String hora = getLocalTime(&agoraTm, 0) ? String(agoraTm.tm_hour) + ":" + (agoraTm.tm_min < 10 ? "0" : "") + String(agoraTm.tm_min)
+                                          : String("sem hora");
+  linhas[n++] = "bateria: " + String(M5.Power.getBatteryLevel()) + "%" + (M5.Power.isCharging() ? " (carregando)" : "") +
+                "   hora: " + hora + (ehNoite() ? " (noite)" : "");
   linhas[n++] = "ligado ha " + String(millis() / 60000) + " min   psram livre: " + String(ESP.getFreePsram() / 1024) + " KB";
 
   canvas.fillRoundRect(4, 4, SCREEN_W - 8, n * 12 + 8, 6, TFT_BLACK);
@@ -688,6 +813,35 @@ static void desenhaPainelDebug() {
   canvas.setTextColor(TFT_GREEN);
   canvas.setTextDatum(top_left);
   for (int i = 0; i < n; i++) canvas.drawString(linhas[i], 10, 8 + i * 12);
+}
+
+// lápide pequena com as mortes (fica pra sempre), massagem, bateria fraca
+static void desenhaExtrasPato() {
+  if (mortes > 0) {
+    desenhaSprite(ANIMS[ANIM_LAPIDE], 0, 4, 4, 1);
+    canvas.setFont(&fonts::Font0);
+    canvas.setTextSize(1);
+    canvas.setTextColor(TFT_WHITE);
+    canvas.setTextDatum(middle_center);
+    canvas.drawString(String(mortes), 4 + 16, 4 + 17);
+  }
+
+  if (estadoBase == ANIM_MORTO && batidas > 0) {
+    // coração que pulsa a cada chacoalhada + barra de progresso das 30 batidas
+    bool pulso = millis() - ultimaBatidaMs < 150;
+    desenhaIcone(ICONE_CORACAO, SCREEN_W / 2, 40, pulso ? 5 : 4);
+    int largura = SCREEN_W - 80, x0 = 40, y0 = 80;
+    canvas.drawRect(x0, y0, largura, 10, TFT_BLACK);
+    canvas.fillRect(x0 + 2, y0 + 2, (largura - 4) * batidas / MASSAGEM_BATIDAS, 6, COR_REC);
+  }
+
+  int bateria = M5.Power.getBatteryLevel();
+  if (bateria >= 0 && bateria <= 20 && !M5.Power.isCharging() && (millis() / 700) % 2) {
+    int bx = SCREEN_W - 34, by = 6;
+    canvas.drawRect(bx, by, 24, 12, TFT_BLACK);
+    canvas.fillRect(bx + 24, by + 3, 3, 6, TFT_BLACK);
+    canvas.fillRect(bx + 2, by + 2, 4, 8, COR_REC);
+  }
 }
 
 static void desenhaCena() {
@@ -710,6 +864,7 @@ static void desenhaCena() {
     desenhaSprite(ANIMS[estado], frame, DUCK_X, DUCK_Y, DUCK_SCALE);
   }
   if (!gravando) desenhaBarra();
+  if (tela == TELA_PATO) desenhaExtrasPato();
 
   // cocôs alinhados no chão, alternando lados do pato
   const Sprite& coco = ANIMS[ANIM_COCO];
@@ -748,9 +903,50 @@ static void desenhaCena() {
 }
 
 static void enviaEspelho() {
-  // espelho: tools/espelho/ lê essa linha pelo USB e redesenha no navegador
+  // espelho: tools/espelho/ lê essas linhas pelo USB e redesenha no navegador
   Serial.printf("PATO %s %u %d %u %s %d\n", ANIMS[estado].name, frame, cocos, frameCoco,
                 FOODS[comida].name, revelandoComida ? 1 : 0);
+  int bateria = M5.Power.getBatteryLevel();
+  bool bateriaFraca = bateria >= 0 && bateria <= 20 && !M5.Power.isCharging();
+  // UI tela gravando decimos arraste mortes hp batidas bateriaFraca cursor carga base
+  Serial.printf("UI %d %d %d %d %d %d %d %d %d %d %s\n", (int)tela, gravando ? 1 : 0,
+                (int)(gravadas * 10 / TAXA_MIC), arrasteX, mortes, hp, batidas, bateriaFraca ? 1 : 0,
+                cursorLembrete, (int)cargaLembretes, ANIMS[estadoBase].name);
+  // lista de tarefas: no máximo 1x por segundo, só com a tela aberta
+  static uint32_t ultimaListaMs = 0;
+  if (tela == TELA_TAREFAS && millis() - ultimaListaMs > 1000) {
+    ultimaListaMs = millis();
+    Serial.printf("LISTA %d\n", qtdLembretes);
+    for (int i = 0; i < qtdLembretes; i++) {
+      const Lembrete& l = lembretes[i];
+      bool marcando = marcandoId == l.id;
+      Serial.printf("L %d %d %d %d %s %s\n", l.id, l.feito ? 1 : 0, l.vencido ? 1 : 0, marcando ? 1 : 0,
+                    l.prazo.length() ? l.prazo.c_str() : "-", l.texto.c_str());
+    }
+  }
+}
+
+// ---------- WiFi: várias redes (escritório, casa, hotspot) ----------
+// Conecta na mais forte que estiver por perto e reconecta sozinho se cair.
+// Roda numa tarefa própria porque procurar redes bloqueia por alguns segundos.
+static WiFiMulti redes;
+
+static void tarefaWifi(void*) {
+  redes.addAP(WIFI_SSID, WIFI_PASS);
+#ifdef WIFI2_SSID
+  redes.addAP(WIFI2_SSID, WIFI2_PASS);
+#endif
+#ifdef WIFI3_SSID
+  redes.addAP(WIFI3_SSID, WIFI3_PASS);
+#endif
+  for (;;) {
+    if (WiFi.status() != WL_CONNECTED) {
+      if (redes.run(10000) == WL_CONNECTED) {
+        Serial.printf("LOG wifi conectado: %s (%d dBm)\n", WiFi.SSID().c_str(), WiFi.RSSI());
+      }
+    }
+    vTaskDelay(pdMS_TO_TICKS(5000));
+  }
 }
 
 // ---------- setup / loop ----------
@@ -775,8 +971,11 @@ void setup() {
   // (o estado do pato mora no servidor, então não perde nada)
   enableLoopWDT();
 
+  // hora certa (Brasília) pra saber quando é noite; sincroniza sozinho quando o WiFi conecta
+  configTzTime("<-03>3", "a.st1.ntp.br", "pool.ntp.org");
+
   WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASS);  // conecta em segundo plano
+  xTaskCreatePinnedToCore(tarefaWifi, "wifi", 6144, nullptr, 1, nullptr, 0);
 
   desenhaCena();
 }
@@ -815,7 +1014,7 @@ void loop() {
       ultimaGravou = gravadas / (float)TAXA_MIC;
       Serial.printf("LOG gravacao: segurou %.1fs, gravou %.1fs de audio\n",
                     (agora - inicioGravacaoMs) / 1000.0f, gravadas / (float)TAXA_MIC);
-      if (ok) enviaIdeia();
+      if (ok) enviaGravacao();
       else voltaProBase(false);
       mudou = true;
     }
@@ -851,6 +1050,8 @@ void loop() {
     hp = novoHp;
     mortes = novasMortes;
     versaoServidor = novaVersao;
+    if (novosCocos != cocos) mudou = true;
+    cocos = novosCocos > MAX_COCOS ? MAX_COCOS : novosCocos;
     bool mudouBase = novoBase != estadoBase;
     estadoBase = novoBase;
     if (mudouBase && ocioso()) {
@@ -960,24 +1161,65 @@ void loop() {
   if (gravando) mudou = true;  // atualiza o contador de segundos
   if (modoDebug && agora % 1000 < 15) mudou = true;  // painel atualiza ~1x por segundo
 
-  // chacoalhar = pato tonto (brincadeira). Só com o pato parado na tela principal e vivo.
-  // (com o pato morto, chacoalhar vai ser a massagem cardíaca)
+  // acelerômetro: pato vivo -> chacoalhar deixa tonto; pato morto -> massagem cardíaca
   {
     static uint32_t ultimoPicoMs = 0;
     static int picos = 0;
     float ax, ay, az;
     if (M5.Imu.getAccel(&ax, &ay, &az)) {
-      float g = sqrtf(ax * ax + ay * ay + az * az);
-      if (fabsf(g - 1.0f) > 1.2f && agora - ultimoPicoMs > 120) { picos++; ultimoPicoMs = agora; }
-      if (agora - ultimoPicoMs > 800) picos = 0;
-      if (picos >= 4) {
-        picos = 0;
-        if (tela == TELA_PATO && ocioso() && estado != ANIM_MORTO && estado != ANIM_TONTO) {
-          Serial.println("LOG chacoalhou: pato tonto");
-          mudaEstado(ANIM_TONTO);
-          fimReacaoMs = agora + 4000;
+      float desvio = fabsf(sqrtf(ax * ax + ay * ay + az * az) - 1.0f);
+      bool morto = estadoBase == ANIM_MORTO;
+      if (morto && tela == TELA_PATO && !gravando && !enviando) {
+        if (desvio > MASSAGEM_LIMIAR_G && agora - ultimaBatidaMs > BATIDA_IGNORA_MS) {
+          batidaMassagem(agora);
           mudou = true;
         }
+      } else if (!morto) {
+        if (desvio > 1.2f && agora - ultimoPicoMs > 120) { picos++; ultimoPicoMs = agora; }
+        if (agora - ultimoPicoMs > 800) picos = 0;
+        if (picos >= 4) {
+          picos = 0;
+          if (tela == TELA_PATO && ocioso() && estado != ANIM_TONTO) {
+            Serial.println("LOG chacoalhou: pato tonto");
+            mudaEstado(ANIM_TONTO);
+            fimReacaoMs = agora + 4000;
+            mudou = true;
+          }
+        }
+      }
+    }
+    // parou de chacoalhar: zera a massagem
+    if (batidas > 0 && agora - ultimaBatidaMs > MASSAGEM_PAUSA_MS) {
+      batidas = 0;
+      mudou = true;
+    }
+    if (batidas > 0 && agora - ultimaBatidaMs < 200) mudou = true;  // coração pulsando
+  }
+
+  // ---- economia de bateria: tela fraca quando ninguém mexe ----
+  {
+    static uint32_t ultimaInteracaoMs = 0;
+    static int brilhoAtual = -1;
+    if (M5.Touch.getCount() > 0 || gravando || enviando || batidas > 0 || !ocioso() ||
+        tela != TELA_PATO || ultimaInteracaoMs == 0) {
+      ultimaInteracaoMs = agora;
+    }
+    bool parado = agora - ultimaInteracaoMs > TELA_DESCANSA_MS;
+    int brilho = !parado ? BRILHO_NORMAL : (ehNoite() ? BRILHO_NOITE : BRILHO_DESCANSO);
+    if (brilho != brilhoAtual) {
+      M5.Display.setBrightness(brilho);
+      brilhoAtual = brilho;
+    }
+  }
+
+  // ---- noite: pato dorme / acorda sozinho (confere a cada 30 s) ----
+  {
+    static uint32_t ultimaChecagemNoiteMs = 0;
+    if (agora - ultimaChecagemNoiteMs > 30000) {
+      ultimaChecagemNoiteMs = agora;
+      if (ocioso() && estado != baseVisual()) {
+        voltaProBase(false);
+        mudou = true;
       }
     }
   }

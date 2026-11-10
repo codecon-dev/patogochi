@@ -33,13 +33,19 @@ Barra de ícones embaixo da tela, um por botão:
 | Status | ← voltar | | |
 
 - **Toque no pato:** quack
-- **Segurar no pato 10 s:** liga/desliga o painel de debug (WiFi, IP, servidor, fome, última gravação/resposta/erro, bateria)
+- **Chacoalhar:** pato vivo fica tonto; pato morto recebe massagem cardíaca (30 chacoalhadas a 100-120 por minuto, luz verde = no ritmo, laranja = quase, vermelha = recomeça)
+- **Pato morto + segurar C:** grava o pedido de desculpas (vai pro `/reviver.php`)
+- **Segurar no pato 10 s:** liga/desliga o painel de debug (WiFi, IP, servidor, fome, hora, última gravação/resposta/erro, bateria)
+
+Sozinho: tela fica fraca depois de 1 min sem mexer, pato dorme entre 0h e 7h, cocôs = lembretes vencidos (vem do servidor), lápide pequena no canto conta as mortes, bateria piscando abaixo de 20%.
 
 ## WiFi e servidor
 
 ```sh
 cp firmware/include/config.example.h firmware/include/config.h   # preencha WiFi (2.4 GHz) e URL
 ```
+
+Dá pra cadastrar até 3 redes (`WIFI2_SSID`, `WIFI3_SSID`...): o Core2 conecta na mais forte por perto e reconecta sozinho.
 
 `config.h` fica fora do git. Os endpoints do back-end PHP estão em [API.md](API.md).
 

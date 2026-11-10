@@ -26,3 +26,5 @@ void efeitosInicia();
 void efeitosAtualiza(uint32_t agora);
 void luz(Luz l);
 void vibra(Vibra v);
+// pisca a barra inteira numa cor por `ms` e volta pra luz atual
+void luzFlash(uint8_t r, uint8_t g, uint8_t b, uint16_t ms = 180);
