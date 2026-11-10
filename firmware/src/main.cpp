@@ -38,8 +38,8 @@ static const uint16_t FRAME_MS[ANIM_COUNT] = {
 static M5Canvas canvas(&M5.Display);
 
 // ---------- quack ----------
-// Mesmo som em velocidades diferentes: mais rápido = agudo/feliz, mais lento = grave/triste.
-enum Quack { QUACK_NORMAL, QUACK_FELIZ, QUACK_TRISTE, QUACK_MORTE };
+// Mesmo som em velocidades diferentes: mais rápido = agudo/feliz, mais lento = grave/enjoado.
+enum Quack { QUACK_NORMAL, QUACK_FELIZ, QUACK_ENJOADO, QUACK_MORTE };
 
 static void quack(Quack tipo) {
   uint32_t taxa = SOM_SAMPLE_RATE;
@@ -47,7 +47,7 @@ static void quack(Quack tipo) {
   switch (tipo) {
     case QUACK_NORMAL: break;
     case QUACK_FELIZ:  taxa = SOM_SAMPLE_RATE * 5 / 4; vezes = 2; break;  // agudo, duas vezes
-    case QUACK_TRISTE: taxa = SOM_SAMPLE_RATE * 2 / 3; break;             // grave e arrastado
+    case QUACK_ENJOADO: taxa = SOM_SAMPLE_RATE * 2 / 3; break;             // grave e arrastado
     case QUACK_MORTE:  taxa = SOM_SAMPLE_RATE / 2; break;                 // bem lento
   }
   M5.Speaker.playRaw(SOM_QUACK, SOM_QUACK_LEN, taxa, false, vezes, -1, true);
@@ -58,8 +58,7 @@ static void quackDoEstado(Anim a) {
   switch (a) {
     case ANIM_EMPOLGADO:    quack(QUACK_FELIZ); break;
     case ANIM_DEBOCHANDO:   quack(QUACK_NORMAL); break;
-    case ANIM_TRISTE_FOME:
-    case ANIM_PASSANDO_MAL: quack(QUACK_TRISTE); break;
+    case ANIM_PASSANDO_MAL: quack(QUACK_ENJOADO); break;
     case ANIM_MORTO:        quack(QUACK_MORTE); break;
     default: break;
   }
@@ -153,7 +152,10 @@ static void trocaEstado(int delta) {
 
 void setup() {
   auto cfg = M5.config();
+  cfg.serial_baudrate = 115200;
   M5.begin(cfg);
+  Serial.begin(115200);
+  Serial.println("PATOGOCHI boot");
   canvas.setPsram(true);
   canvas.setColorDepth(16);
   canvas.createSprite(SCREEN_W, SCREEN_H);
@@ -173,7 +175,7 @@ void loop() {
   auto toque = M5.Touch.getDetail();
   if (toque.wasPressed() && !revelandoComida && tocouNoPato(toque.x, toque.y)) {
     quack(estado == ANIM_EMPOLGADO ? QUACK_FELIZ
-          : (estado == ANIM_TRISTE_FOME || estado == ANIM_PASSANDO_MAL) ? QUACK_TRISTE
+          : estado == ANIM_PASSANDO_MAL ? QUACK_ENJOADO
           : estado == ANIM_MORTO ? QUACK_MORTE : QUACK_NORMAL);
   }
 
