@@ -58,12 +58,29 @@ O Core2 só desenha e grava. Assim ele sobrevive a reboot e bateria acabando.
 - Fome vai de 100 a 0. Perde **~4 por hora** (≈ 25h de cheio a vazio).
 - Cada ideia boa: **+30**. Ideia ruim: **+5** e fica `passando_mal` por 10 min.
 - Fome < 30 → `triste_fome` + LED vermelho.
-- Fome em 0 por **12h** → `morto`. Revive, mas com malefício (ver decisões).
+- Fome em 0 por **12h** → `morto`. Revive com prenda (ver abaixo).
 - Ideia com prazo ("me lembra de X até sexta") vira **lembrete**.
 - Lembrete vencido → 1 cocô na tela. Só sai quando marcar como feito (toque no cocô).
 - Cocô acumulado também tira fome mais rápido (opcional).
 
 ---
+
+## Morte e ressurreição
+
+1. **Pedir desculpas implorando:** segura o botão e grava. O Claude julga se foi sincero o bastante. Se não foi, o pato debocha e você tenta de novo.
+2. **Massagem cardíaca:** 30 chacoalhadas no ritmo de 100 a 120 por minuto, lidas pelo acelerômetro (IMU) do Core2. A tela mostra um coração pulsando e o contador. Errou o ritmo, volta pro zero.
+3. Pato revive com fome 50.
+4. **Lápide:** contador de mortes 💀 fica na tela pra sempre.
+
+## Alexa (back-end PHP)
+
+| Função | Como | Esforço |
+|---|---|---|
+| **Dedo-duro** | Fome baixa, passando mal ou morte → Alexa anuncia pra casa toda. PHP chama a URL do Voice Monkey. | ~1-2h |
+| **Funeral** | Pato morre → Alexa toca música fúnebre e lê o obituário escrito pelo Claude (cita a última ideia comida). Mesmo Voice Monkey. | ~1h depois do dedo-duro |
+| **Alimentar pela Alexa** | "Alexa, fala pro pato: …" → skill custom (modo dev, sem publicar) → manda o texto pro mesmo endpoint de ideia do PHP. | ~1-2 dias |
+
+Obs: o endpoint de ideia precisa aceitar **áudio (Core2) ou texto (Alexa)**.
 
 ## Etapas = passos do vídeo
 
@@ -93,7 +110,7 @@ O Core2 só desenha e grava. Assim ele sobrevive a reboot e bateria acabando.
 - [x] Servidor: **PHP** (parceiro cuida)
 - [ ] Transcrição: Whisper API (simples) ou whisper.cpp local (sem custo)
 - [ ] Mapeamento de comidas acima
-- [x] Pato morto **revive**, mas com malefício (definir qual)
+- [x] Pato morto **revive** com prenda (ver "Morte e ressurreição")
 - [ ] Opinião do pato: só texto na tela ou também som no speaker?
 
 ## Riscos conhecidos (do roteiro)
