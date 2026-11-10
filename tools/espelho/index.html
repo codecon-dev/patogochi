@@ -96,9 +96,9 @@ function desenhaIcone(icone, cx, cy, escala) {
 }
 
 let estado = { anim: 'parado', frame: 0, cocos: 0, frameCoco: 0, comida: null, revelando: false };
-// UI tela gravando decimos arraste mortes hp batidas bateriaFraca cursor carga base
+// UI tela gravando decimos arraste mortes hp batidas bateria cursor carga base
 let ui = { tela: 0, gravando: false, decimos: 0, arraste: 0, mortes: 0, hp: -1, batidas: 0,
-           bateriaFraca: false, cursor: 0, carga: 0, base: 'parado' };
+           bateria: 0, cursor: 0, carga: 0, base: 'parado' };
 let lista = [];          // [{id, feito, vencido, marcando, prazo, texto}]
 let listaNova = null;    // sendo recebida
 let listaFaltam = 0;
@@ -177,11 +177,21 @@ function desenhaExtrasPato() {
       texto(ui.desculpa ? 'segure o microfone e implore!' : 'faça massagem cardíaca!', W / 2, 52, COR_TEXTO, 16, 'center');
     }
   }
-  if (ui.bateriaFraca && Math.floor(performance.now() / 700) % 2) {
-    const bx = W - 34, by = 6;
-    ctx.strokeStyle = '#000'; ctx.lineWidth = 1; ctx.strokeRect(bx + .5, by + .5, 23, 11);
-    ctx.fillStyle = '#000'; ctx.fillRect(bx + 24, by + 3, 3, 6);
-    ctx.fillStyle = COR_REC; ctx.fillRect(bx + 2, by + 2, 4, 8);
+  // bateria no canto esquerdo: 1 = fraca (vermelha piscando), 2 = carregando (verde-escura com raio)
+  if (ui.bateria === 2 || (ui.bateria === 1 && Math.floor(performance.now() / 700) % 2)) {
+    const bx = 8, by = 6, w = 26, h = 14;
+    ctx.fillStyle = ctx.strokeStyle = ui.bateria === 1 ? COR_REC : '#2E6B1F';
+    ctx.lineWidth = 2; ctx.strokeRect(bx + 1, by + 1, w - 2, h - 2);
+    ctx.fillRect(bx + w, by + 4, 3, h - 8);
+    if (ui.bateria === 1) {
+      ctx.fillRect(bx + 3, by + 3, 5, h - 6);
+    } else {
+      const cx = bx + w / 2, cy = by + h / 2;
+      ctx.beginPath();
+      ctx.moveTo(cx + 3, by + 2); ctx.lineTo(cx - 5, cy + 1); ctx.lineTo(cx + 1, cy + 1); ctx.closePath();
+      ctx.moveTo(cx - 1, cy - 1); ctx.lineTo(cx + 5, cy - 1); ctx.lineTo(cx - 3, by + h - 3); ctx.closePath();
+      ctx.fill();
+    }
   }
 }
 
@@ -271,7 +281,7 @@ function desenha() {
 
 // linhas do firmware (enviaEspelho em main.cpp):
 //   PATO <anim> <frame> <cocos> <frameCoco> <comida> <revelando>
-//   UI <tela> <gravando> <decimos> <arraste> <mortes> <hp> <batidas> <bateriaFraca> <cursor> <carga> <base> <exigeDesculpa>
+//   UI <tela> <gravando> <decimos> <arraste> <mortes> <hp> <batidas> <bateria 0/1 fraca/2 carregando> <cursor> <carga> <base> <exigeDesculpa>
 //   LISTA <n>  seguido de n linhas  L <id> <feito> <vencido> <marcando> <prazo|-> <texto...>
 function processaLinha(linha) {
   linha = linha.replace(/\r$/, '');
@@ -285,7 +295,7 @@ function processaLinha(linha) {
     if (batidas !== batidasAntes && batidas > 0) ultimaBatida = performance.now();
     batidasAntes = batidas;
     ui = { tela: +p[1], gravando: p[2] === '1', decimos: +p[3], arraste: +p[4], mortes: +p[5], hp: +p[6],
-           batidas, bateriaFraca: p[8] === '1', cursor: +p[9], carga: +p[10], base: p[11],
+           batidas, bateria: +p[8], cursor: +p[9], carga: +p[10], base: p[11],
            desculpa: p[12] === '1' };
     desenha();
   } else if (p[0] === 'LISTA') {

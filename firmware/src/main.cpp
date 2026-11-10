@@ -44,6 +44,7 @@ static constexpr uint16_t COR_NOITE = 0x396D;  // roxo (#3D2C6B) quando o pato d
 static uint16_t corIcone = TFT_BLACK;          // vira branco no fundo roxo
 static constexpr uint16_t COR_TEXTO = 0x2104;
 static constexpr uint16_t COR_REC = TFT_RED;
+static constexpr uint16_t COR_CARREGANDO = 0x2B43;  // verde-escuro (#2E6B1F), destaca do fundo
 
 // ms por frame de cada animação (ajustar olhando no aparelho)
 static const uint16_t FRAME_MS[ANIM_COUNT] = {
@@ -154,6 +155,8 @@ static Anim reacaoPendente = ANIM_PARADO;
 static uint32_t fimReacaoMs = 0;       // 0 = sem reação em andamento
 
 static void enviaEspelho();
+static void desenhaBateria();
+static int estadoBateria();
 
 static void comecaRevelacao() {
   revelandoComida = true;
@@ -1041,12 +1044,31 @@ static void desenhaExtrasPato() {
     }
   }
 
-  int bateria = M5.Power.getBatteryLevel();
-  if (bateria >= 0 && bateria <= 20 && !M5.Power.isCharging() && (millis() / 700) % 2) {
-    int bx = SCREEN_W - 34, by = 6;
-    canvas.drawRect(bx, by, 24, 12, TFT_BLACK);
-    canvas.fillRect(bx + 24, by + 3, 3, 6, TFT_BLACK);
-    canvas.fillRect(bx + 2, by + 2, 4, 8, COR_REC);
+  desenhaBateria();
+}
+
+// 0 = normal, 1 = fraca (<=20% na bateria), 2 = carregando
+static int estadoBateria() {
+  if (M5.Power.isCharging()) return 2;
+  int nivel = M5.Power.getBatteryLevel();
+  return nivel >= 0 && nivel <= 20 ? 1 : 0;
+}
+
+// canto esquerdo de cima: bateria vermelha piscando quando fraca, verde-escura com raio carregando
+static void desenhaBateria() {
+  int st = estadoBateria();
+  if (st == 0 || (st == 1 && (millis() / 700) % 2 == 0)) return;
+  uint16_t cor = st == 1 ? COR_REC : COR_CARREGANDO;
+  int bx = 8, by = 6, w = 26, h = 14;
+  canvas.drawRect(bx, by, w, h, cor);
+  canvas.drawRect(bx + 1, by + 1, w - 2, h - 2, cor);
+  canvas.fillRect(bx + w, by + 4, 3, h - 8, cor);
+  if (st == 1) {
+    canvas.fillRect(bx + 3, by + 3, 5, h - 6, cor);   // só um tiquinho de carga
+  } else {
+    int cx = bx + w / 2, cy = by + h / 2;              // raio
+    canvas.fillTriangle(cx + 3, by + 2, cx - 5, cy + 1, cx + 1, cy + 1, cor);
+    canvas.fillTriangle(cx - 1, cy - 1, cx + 5, cy - 1, cx - 3, by + h - 3, cor);
   }
 }
 
@@ -1151,11 +1173,9 @@ static void enviaEspelho() {
   // espelho: tools/espelho/ lê essas linhas pelo USB e redesenha no navegador
   Serial.printf("PATO %s %u %d %u %s %d\n", ANIMS[estado].name, frame, cocos, frameCoco,
                 FOODS[comida].name, revelandoComida ? 1 : 0);
-  int bateria = M5.Power.getBatteryLevel();
-  bool bateriaFraca = bateria >= 0 && bateria <= 20 && !M5.Power.isCharging();
-  // UI tela gravando decimos arraste mortes hp batidas bateriaFraca rolagem carga base exige
+  // UI tela gravando decimos arraste mortes hp batidas bateria(0/1 fraca/2 carregando) rolagem carga base exige
   Serial.printf("UI %d %d %d %d %d %d %d %d %d %d %s %d\n", (int)tela, gravando ? 1 : 0,
-                (int)(gravadas * 10 / TAXA_MIC), arrasteX, mortes, hp, batidas, bateriaFraca ? 1 : 0,
+                (int)(gravadas * 10 / TAXA_MIC), arrasteX, mortes, hp, batidas, estadoBateria(),
                 rolagem, (int)cargaLembretes, ANIMS[estadoBase].name, (int)exigencia);
   // lista de tarefas: no máximo 1x por segundo, só com a tela aberta
   static uint32_t ultimaListaMs = 0;
