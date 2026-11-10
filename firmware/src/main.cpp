@@ -265,8 +265,10 @@ static Anim animPorNome(const char* nome, Anim padrao) {
 
 static void comecaHttp(HTTPClient& http, WiFiClientSecure& seguro, const String& caminho) {
   String url = String(SERVIDOR_URL) + caminho;
+  http.setConnectTimeout(8000);   // padrão da lib é bem maior
   if (url.startsWith("https://")) {
     seguro.setInsecure();  // não confere o certificado (simples; dá pra fixar o certificado depois)
+    seguro.setHandshakeTimeout(15);  // segundos; o padrão é 120 e travava o pato no "pensando"
     http.begin(seguro, url);
   } else {
     http.begin(url);
@@ -290,9 +292,15 @@ static uint8_t* montaMultipart(size_t& tamanho) {
 }
 
 static bool consultandoEstado();
+// cada envio tem um id; se o loop desistir (ENVIO_DESISTE_MS), a resposta atrasada é descartada
+static constexpr uint32_t ENVIO_DESISTE_MS = 70000;
+static volatile uint32_t envioId = 0;
+static uint32_t envioDesdeMs = 0;
+
 static void tarefaEnvio(void*) {
+  uint32_t meuId = envioId;
   Resposta r;
-  while (consultandoEstado()) vTaskDelay(pdMS_TO_TICKS(50));
+  for (int i = 0; i < 300 && consultandoEstado(); i++) vTaskDelay(pdMS_TO_TICKS(50));  // até 15 s
   if (WiFi.status() != WL_CONNECTED) {
     r.erro = "sem wifi";
   } else {
@@ -329,14 +337,20 @@ static void tarefaEnvio(void*) {
                                                         : "Erro " + String(codigo);
     }
   }
-  resposta = r;
-  respostaPronta = true;
-  enviando = false;
+  if (meuId == envioId) {
+    resposta = r;
+    respostaPronta = true;
+    enviando = false;
+  } else {
+    Serial.println("LOG resposta atrasada descartada");
+  }
   vTaskDelete(nullptr);
 }
 
 static void enviaIdeia() {
   escreveCabecalhoWav(gravadas);
+  envioId++;
+  envioDesdeMs = millis();
   enviando = true;
   respostaPronta = false;
   mudaEstado(ANIM_PENSANDO, false);
@@ -380,7 +394,11 @@ static volatile bool estadoPronto = false;
 static Anim novoBase = ANIM_PARADO;
 static int novoHp = -1, novasMortes = 0, novaVersao = -1;
 
+static constexpr uint32_t CONSULTA_DESISTE_MS = 30000;
+static volatile uint32_t consultaId = 0;
+
 static void tarefaEstado(void*) {
+  uint32_t meuId = consultaId;
   WiFiClientSecure seguro;  // antes do HTTPClient (ver tarefaEnvio)
   HTTPClient http;
   comecaHttp(http, seguro, "/estado.php");
@@ -395,9 +413,9 @@ static void tarefaEstado(void*) {
     novoHp = doc["hp"] | -1;
     novasMortes = doc["mortes"] | 0;
     novaVersao = doc["versao"] | -1;
-    estadoPronto = true;
+    if (meuId == consultaId) estadoPronto = true;
   }
-  consultando = false;
+  if (meuId == consultaId) consultando = false;
   vTaskDelete(nullptr);
 }
 
@@ -406,6 +424,7 @@ static bool redeOcupadaTelas();
 static void consultaEstado() {
   if (consultando || enviando || redeOcupadaTelas() || WiFi.status() != WL_CONNECTED) return;
   consultando = true;
+  consultaId++;
   ultimaConsultaMs = millis();
   jaConsultou = true;
   xTaskCreatePinnedToCore(tarefaEstado, "estado", 12288, nullptr, 1, nullptr, 0);
@@ -448,7 +467,7 @@ static String diaMes(const char* iso) {
 }
 
 static void tarefaLembretes(void*) {
-  while (consultando || enviando) vTaskDelay(pdMS_TO_TICKS(50));  // uma conexão por vez
+  for (int i = 0; i < 300 && (consultando || enviando); i++) vTaskDelay(pdMS_TO_TICKS(50));  // uma conexão por vez (até 15 s)
   WiFiClientSecure seguro;  // antes do HTTPClient (ver tarefaEnvio)
   HTTPClient http;
   comecaHttp(http, seguro, "/lembretes.php");
@@ -492,7 +511,7 @@ static void carregaLembretes() {
 }
 
 static void tarefaMarcaFeito(void*) {
-  while (consultando || enviando) vTaskDelay(pdMS_TO_TICKS(50));  // uma conexão por vez
+  for (int i = 0; i < 300 && (consultando || enviando); i++) vTaskDelay(pdMS_TO_TICKS(50));  // uma conexão por vez (até 15 s)
   int id = marcandoId;
   WiFiClientSecure seguro;
   HTTPClient http;
@@ -752,6 +771,10 @@ void setup() {
   wav = buffer + FOLGA;
   amostras = (int16_t*)(wav + 44);
 
+  // se o loop principal congelar por mais de 5 s, o ESP32 reinicia sozinho
+  // (o estado do pato mora no servidor, então não perde nada)
+  enableLoopWDT();
+
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASS);  // conecta em segundo plano
 
@@ -797,6 +820,25 @@ void loop() {
       mudou = true;
     }
   }
+  // desiste de requisições penduradas (rede caiu no meio, servidor travado...)
+  if (enviando && agora - envioDesdeMs >= ENVIO_DESISTE_MS) {
+    Serial.println("LOG envio demorou demais: desistindo");
+    envioId++;  // a tarefa antiga, se um dia voltar, é ignorada
+    enviando = false;
+    resposta = Resposta();
+    resposta.erro = "servidor demorou demais";
+    respostaPronta = true;
+  }
+  if (consultando && agora - ultimaConsultaMs >= CONSULTA_DESISTE_MS) {
+    Serial.println("LOG consulta de estado pendurada: liberando");
+    consultaId++;
+    consultando = false;
+  }
+  if (cargaLembretes == CARGA_CARREGANDO && agora - ultimoBotaoMs >= CONSULTA_DESISTE_MS) {
+    erroLembretes = "servidor demorou demais";
+    cargaLembretes = CARGA_ERRO;
+  }
+
   if (respostaPronta) { trataResposta(); mudou = true; }
 
   // consulta o servidor assim que o WiFi conecta e depois a cada CONSULTA_MS
