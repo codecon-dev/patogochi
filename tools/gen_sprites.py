@@ -5,6 +5,7 @@ Uso (da raiz do repo):  python3 tools/gen_sprites.py
 Precisa do ffmpeg instalado. Gera firmware/src/sprites_data.cpp e firmware/include/sprites.h.
 Pixel transparente vira SPRITE_TRANSPARENT (magenta 0xF81F).
 """
+import json
 import pathlib
 import subprocess
 import sys
@@ -13,6 +14,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 SPRITES = ROOT / "assets" / "sprites"
 OUT_CPP = ROOT / "firmware" / "src" / "sprites_data.cpp"
 OUT_H = ROOT / "firmware" / "include" / "sprites.h"
+OUT_JS = ROOT / "tools" / "espelho" / "sprites.js"
 TRANSPARENT = 0xF81F
 
 # (pasta, nome no código) — animações do pato, na ordem do enum
@@ -75,6 +77,7 @@ def emit(name, frames_px, w, h):
 def main():
     cpp = ['// GERADO por tools/gen_sprites.py — não editar à mão', '#include "sprites.h"', ""]
     anim_entries, food_entries = [], []
+    counts = {}
     total = 0
     for folder, name in ANIMS + COMIDAS:
         is_food = (folder, name) in COMIDAS
@@ -92,6 +95,8 @@ def main():
         cpp.append(emit(name, frames, w, h))
         entry = f'  {{"{folder}", {w}, {h}, {len(frames)}, {name}_DATA}},'
         (food_entries if is_food else anim_entries).append(entry)
+        if not is_food:
+            counts[folder] = len(frames)
         total += len(frames) * w * h * 2
         print(f"{folder:18} {len(frames):3} frames {w}x{h}")
     cpp.append("\nconst Sprite ANIMS[ANIM_COUNT] = {\n" + "\n".join(anim_entries) + "\n};")
@@ -108,6 +113,8 @@ def main():
           "extern const Sprite ANIMS[ANIM_COUNT];", "extern const Sprite FOODS[FOOD_COUNT];", ""]
     OUT_H.parent.mkdir(exist_ok=True)
     OUT_H.write_text("\n".join(h))
+    OUT_JS.write_text("// GERADO por tools/gen_sprites.py — não editar à mão\n"
+                      f"const FRAME_COUNTS = {json.dumps(counts)};\n")
     print(f"total: {total / 1024:.0f} KB em flash")
 
 

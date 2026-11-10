@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Espelho do Patogochi</title>
+<style>
+  :root { --bg: #111; --fg: #ddd; --muted: #888; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px system-ui, sans-serif;
+         display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 16px; }
+  canvas { image-rendering: pixelated; width: min(960px, 100%); aspect-ratio: 4 / 3; display: block; }
+  .barra { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  button { background: #333; color: var(--fg); border: 1px solid #555; border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+  button:hover { background: #444; }
+  #status { color: var(--muted); }
+  body.limpo .barra { display: none; }
+</style>
+</head>
+<body>
+<canvas id="tela" width="320" height="240"></canvas>
+<div class="barra">
+  <button id="conectar">Conectar no Core2</button>
+  <button id="demo">Demo (sem aparelho)</button>
+  <button id="fundo">Fundo: cena</button>
+  <button id="limpo">Esconder botões (tecla H)</button>
+  <span id="status">desconectado</span>
+</div>
+<script src="sprites.js"></script>
+<script>
+// Mesmas medidas do firmware/src/main.cpp
+const W = 320, H = 240, DUCK_SCALE = 6, DUCK_X = 64, GROUND_Y = 214;
+const DUCK_Y = GROUND_Y - 32 * DUCK_SCALE + 6;
+const COCO_SCALE = 3, COCO_W = 13, COCO_H = 14;
+const COCO_X = [12, W - 12 - COCO_W * COCO_SCALE, 60, W - 60 - COCO_W * COCO_SCALE];
+const COR_CEU = '#CEEFFF', COR_CHAO = '#9CD24A';
+const FUNDOS = ['cena', 'verde'];
+
+const tela = document.getElementById('tela');
+const ctx = tela.getContext('2d');
+ctx.imageSmoothingEnabled = false;
+const statusEl = document.getElementById('status');
+
+// carrega todos os PNGs
+const imgs = {};
+const carregando = [];
+for (const [nome, n] of Object.entries(FRAME_COUNTS)) {
+  imgs[nome] = [];
+  for (let i = 1; i <= n; i++) {
+    const img = new Image();
+    img.src = `../../assets/sprites/${nome}/${String(i).padStart(2, '0')}.png`;
+    carregando.push(img.decode().catch(() => console.warn('falhou', img.src)));
+    imgs[nome].push(img);
+  }
+}
+
+let estado = { anim: 'parado', frame: 0, cocos: 0, frameCoco: 0 };
+let fundo = 0;
+
+function desenha() {
+  ctx.clearRect(0, 0, W, H);
+  if (FUNDOS[fundo] === 'cena') {
+    ctx.fillStyle = COR_CEU; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = COR_CHAO; ctx.fillRect(0, GROUND_Y, W, H - GROUND_Y);
+  } else if (FUNDOS[fundo] === 'verde') {
+    ctx.fillStyle = '#00FF00'; ctx.fillRect(0, 0, W, H);
+  }
+  const frames = imgs[estado.anim];
+  if (frames) {
+    const img = frames[estado.frame % frames.length];
+    ctx.drawImage(img, DUCK_X, DUCK_Y, 32 * DUCK_SCALE, 32 * DUCK_SCALE);
+  }
+  for (let i = 0; i < estado.cocos && i < COCO_X.length; i++) {
+    const img = imgs.coco[(estado.frameCoco + i * 3) % imgs.coco.length];
+    ctx.drawImage(img, COCO_X[i], GROUND_Y - COCO_H * COCO_SCALE + 4, COCO_W * COCO_SCALE, COCO_H * COCO_SCALE);
+  }
+}
+
+// linha do firmware: "PATO <anim> <frame> <cocos> <frameCoco>"
+function processaLinha(linha) {
+  const p = linha.trim().split(' ');
+  if (p[0] !== 'PATO' || p.length < 5) return;
+  estado = { anim: p[1], frame: +p[2], cocos: +p[3], frameCoco: +p[4] };
+  statusEl.textContent = `conectado · ${estado.anim} frame ${estado.frame} · ${estado.cocos} cocô(s)`;
+  desenha();
+}
+
+let porta = null;
+async function conectar() {
+  if (!('serial' in navigator)) {
+    statusEl.textContent = 'esse navegador não tem Web Serial: use Chrome ou Edge';
+    return;
+  }
+  pararDemo();
+  try {
+    porta = await navigator.serial.requestPort();
+    await porta.open({ baudRate: 115200 });
+  } catch (e) {
+    statusEl.textContent = 'não conectou: ' + e.message + ' (feche o pio monitor se estiver aberto)';
+    return;
+  }
+  statusEl.textContent = 'conectado, esperando o pato…';
+  const leitor = porta.readable.pipeThrough(new TextDecoderStream()).getReader();
+  let buf = '';
+  try {
+    while (true) {
+      const { value, done } = await leitor.read();
+      if (done) break;
+      buf += value;
+      let i;
+      while ((i = buf.indexOf('\n')) >= 0) {
+        processaLinha(buf.slice(0, i));
+        buf = buf.slice(i + 1);
+      }
+    }
+  } catch (e) {
+    statusEl.textContent = 'desconectou: ' + e.message;
+  }
+}
+
+// demo: passa por todos os estados sem aparelho, pra testar a página
+let demoTimer = null;
+function pararDemo() { clearInterval(demoTimer); demoTimer = null; }
+function demo() {
+  if (demoTimer) { pararDemo(); statusEl.textContent = 'demo parada'; return; }
+  const anims = Object.keys(FRAME_COUNTS).filter(n => n !== 'coco');
+  let a = 0, f = 0, voltas = 0, fc = 0;
+  demoTimer = setInterval(() => {
+    const n = FRAME_COUNTS[anims[a]];
+    f++; fc = (fc + 1) % FRAME_COUNTS.coco;
+    if (f >= n) { f = 0; if (++voltas >= Math.max(1, Math.ceil(12 / n))) { voltas = 0; a = (a + 1) % anims.length; } }
+    processaLinha(`PATO ${anims[a]} ${f} ${a % 5} ${fc}`);
+    statusEl.textContent = 'demo · ' + statusEl.textContent.replace(/^conectado · /, '');
+  }, 120);
+}
+
+document.getElementById('conectar').onclick = conectar;
+document.getElementById('demo').onclick = demo;
+document.getElementById('fundo').onclick = (ev) => {
+  fundo = (fundo + 1) % FUNDOS.length;
+  ev.target.textContent = 'Fundo: ' + FUNDOS[fundo];
+  desenha();
+};
+document.getElementById('limpo').onclick = () => document.body.classList.add('limpo');
+document.addEventListener('keydown', (e) => { if (e.key === 'h' || e.key === 'H') document.body.classList.toggle('limpo'); });
+
+Promise.all(carregando).then(desenha);
+</script>
+</body>
+</html>

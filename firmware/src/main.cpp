@@ -78,6 +78,9 @@ static void desenhaCena() {
   canvas.drawString("< estado     coco     estado >", SCREEN_W / 2, SCREEN_H - 2);
 
   canvas.pushSprite(0, 0);
+
+  // espelho: tools/espelho/ lê essa linha pelo USB e redesenha no navegador
+  Serial.printf("PATO %s %u %d %u\n", ANIMS[estado].name, frame, cocos, frameCoco);
 }
 
 static void trocaEstado(int delta) {
