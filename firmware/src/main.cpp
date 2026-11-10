@@ -29,7 +29,6 @@ static constexpr int MAX_COCOS = 4;
 // cores (RGB565)
 static constexpr uint16_t COR_FUNDO = 0x9E89;  // verde
 static constexpr uint16_t COR_TEXTO = 0x2104;
-static constexpr uint16_t COR_BALAO = TFT_WHITE;
 static constexpr uint16_t COR_REC = TFT_RED;
 
 // ms por frame de cada animação (ajustar olhando no aparelho)
@@ -106,10 +105,7 @@ static bool comendoIdeia = false;      // false = comendo em loop (debug pelo bo
 static Anim reacaoPendente = ANIM_PARADO;
 static uint32_t fimReacaoMs = 0;       // 0 = sem reação em andamento
 
-// balão de fala
-static constexpr uint32_t BALAO_MS = 8000;
-static String balao;
-static uint32_t fimBalaoMs = 0;
+static void enviaEspelho();
 
 static void comecaRevelacao() {
   revelandoComida = true;
@@ -123,20 +119,6 @@ static void mudaEstado(Anim novo, bool comSom = true) {
   revelandoComida = false;
   if (estado == ANIM_COMENDO) comecaRevelacao();
   if (comSom) quackDoEstado(estado);
-}
-
-static void enviaEspelho();
-
-static void mostraBalao(const String& texto) {
-  balao = texto;
-  fimBalaoMs = millis() + BALAO_MS;
-  Serial.printf("FALA %s\n", texto.c_str());
-}
-
-static void escondeBalao() {
-  if (balao.length() == 0) return;
-  balao = "";
-  Serial.println("FALA");
 }
 
 // ---------- gravação ----------
@@ -153,6 +135,7 @@ static uint8_t* wav = nullptr;                             // cabeçalho (44 byt
 static int16_t* amostras = nullptr;
 static size_t gravadas = 0;
 static bool gravando = false;
+static String ultimoErro;  // só pro rótulo de debug e pro log serial
 static uint32_t inicioGravacaoMs = 0;
 
 static void escreveCabecalhoWav(size_t n) {
@@ -171,7 +154,7 @@ static void comecaGravacao() {
   gravadas = 0;
   gravando = true;
   inicioGravacaoMs = millis();
-  escondeBalao();
+  ultimoErro = "";
   mudaEstado(ANIM_OUVINDO, false);
 }
 
@@ -193,7 +176,7 @@ static bool terminaGravacao() {
 // API: https://patogochi.codegus.com/docs.html
 struct Resposta {
   bool ok = false;
-  String opiniao, prazo, erro;
+  String erro;
   int comida = -1;                 // índice em FOODS, -1 = nenhuma
   Anim reacao = ANIM_EMPOLGADO;
 };
@@ -239,18 +222,11 @@ static uint8_t* montaMultipart(size_t& tamanho) {
   return inicio;
 }
 
-// "2026-11-15T18:00:00-03:00" -> "15/11 18:00"
-static String formataPrazo(const String& iso) {
-  if (iso.length() < 16) return iso;
-  return iso.substring(8, 10) + "/" + iso.substring(5, 7) + " " + iso.substring(11, 16);
-}
-
 static void tarefaEnvio(void*) {
   Resposta r;
   if (WiFi.status() != WL_CONNECTED) {
-    r.erro = "Sem WiFi :(";
+    r.erro = "sem wifi";
   } else {
-    // 1. manda a ideia
     HTTPClient http;
     WiFiClientSecure seguro;
     comecaHttp(http, seguro, "/ideia.php");
@@ -270,24 +246,11 @@ static void tarefaEnvio(void*) {
       r.ok = true;
       r.comida = indiceComida(doc["tipo"]);
       r.reacao = animPorNome(doc["estado"], ANIM_EMPOLGADO);
-      if (doc["prazo"].is<const char*>()) r.prazo = formataPrazo(doc["prazo"].as<const char*>());
 
-      // 2. a opinião não vem na resposta: busca no estado
-      HTTPClient httpEstado;
-      WiFiClientSecure seguroEstado;
-      comecaHttp(httpEstado, seguroEstado, "/estado.php");
-      httpEstado.setTimeout(10000);
-      if (httpEstado.GET() == 200) {
-        JsonDocument estadoDoc;
-        if (!deserializeJson(estadoDoc, httpEstado.getString())) {
-          r.opiniao = estadoDoc["ultima_opiniao"] | "";
-        }
-      }
-      httpEstado.end();
     } else if (codigo == 409) {
-      r.erro = "Tô morto. Me revive primeiro.";
+      r.erro = "pato morto (409)";
     } else if (codigo <= 0) {
-      r.erro = "Servidor não respondeu";
+      r.erro = "servidor não respondeu";
     } else {
       r.erro = jsonOk && doc["error"].is<const char*>() ? String(doc["error"].as<const char*>())
                                                         : "Erro " + String(codigo);
@@ -310,14 +273,13 @@ static void enviaIdeia() {
 static void trataResposta() {
   respostaPronta = false;
   if (!resposta.ok) {
-    mostraBalao(resposta.erro);
+    // nada escrito na tela: o pato só debocha (erro vai pro log e pro rótulo de debug)
+    ultimoErro = resposta.erro;
+    Serial.printf("LOG erro: %s\n", resposta.erro.c_str());
     mudaEstado(ANIM_DEBOCHANDO);
     fimReacaoMs = millis() + REACAO_MS;
     return;
   }
-  String fala = resposta.opiniao;
-  if (resposta.prazo.length()) fala += (fala.length() ? " " : "") + String("Lembrete: ") + resposta.prazo;
-  if (fala.length()) mostraBalao(fala);
   if (resposta.comida >= 0) {
     comida = (Food)resposta.comida;
     comendoIdeia = true;
@@ -340,42 +302,6 @@ static void desenhaSprite(const Sprite& s, uint16_t f, int x, int y, int escala)
       canvas.fillRect(x + i * escala, y + j * escala, escala, escala, c);
     }
   }
-}
-
-// Quebra o texto em até 3 linhas que cabem em `largura` pixels.
-static int quebraLinhas(const String& texto, int largura, String linhas[3]) {
-  int n = 0;
-  String atual;
-  int i = 0;
-  while (i <= (int)texto.length() && n < 3) {
-    int fim = texto.indexOf(' ', i);
-    if (fim < 0) fim = texto.length();
-    String palavra = texto.substring(i, fim);
-    String teste = atual.length() ? atual + " " + palavra : palavra;
-    if (canvas.textWidth(teste) > largura && atual.length()) {
-      linhas[n++] = atual;
-      atual = palavra;
-    } else {
-      atual = teste;
-    }
-    i = fim + 1;
-  }
-  if (n < 3 && atual.length()) linhas[n++] = atual;
-  return n;
-}
-
-static void desenhaBalao() {
-  canvas.setFont(&fonts::efontJA_16);
-  canvas.setTextSize(1);
-  String linhas[3];
-  int n = quebraLinhas(balao, SCREEN_W - 40, linhas);
-  int h = n * 18 + 12;
-  canvas.fillRoundRect(8, 6, SCREEN_W - 16, h, 8, COR_BALAO);
-  canvas.drawRoundRect(8, 6, SCREEN_W - 16, h, 8, COR_TEXTO);
-  canvas.setTextColor(COR_TEXTO);
-  canvas.setTextDatum(top_left);
-  for (int i = 0; i < n; i++) canvas.drawString(linhas[i], 20, 12 + i * 18);
-  canvas.setFont(&fonts::Font0);
 }
 
 static void desenhaCena() {
@@ -407,16 +333,15 @@ static void desenhaCena() {
     canvas.setTextDatum(middle_right);
     canvas.setTextSize(2);
     canvas.drawString(String(gravadas / (float)TAXA_MIC, 1) + "s", SCREEN_W - 32, 17);
-  } else if (balao.length()) {
-    desenhaBalao();
   }
 
   // rótulos de debug
   canvas.setTextColor(COR_TEXTO);
   canvas.setTextSize(1);
-  if (!balao.length() && !gravando) {
+  if (!gravando) {
     canvas.setTextDatum(top_left);
-    canvas.drawString(ANIMS[estado].name, 6, 6);
+    canvas.drawString(ultimoErro.length() ? ANIMS[estado].name + String(" | ") + ultimoErro
+                                          : String(ANIMS[estado].name), 6, 6);
   }
   canvas.setTextDatum(bottom_left);
   canvas.drawString(WiFi.status() == WL_CONNECTED ? "wifi ok" : "sem wifi", 6, SCREEN_H - 2);
@@ -502,7 +427,6 @@ void loop() {
     mudaEstado(ANIM_PARADO, false);
     mudou = true;
   }
-  if (balao.length() && (int32_t)(agora - fimBalaoMs) >= 0) { escondeBalao(); mudou = true; }
 
   if (revelandoComida) {
     if (agora - inicioRevelaMs >= REVELA_MS) {
