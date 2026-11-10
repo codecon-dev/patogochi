@@ -155,7 +155,7 @@ static void mudaEstado(Anim novo, bool comSom = true) {
 
 // ---------- gravação ----------
 static constexpr uint32_t TAXA_MIC = 16000;
-static constexpr size_t MAX_AMOSTRAS = TAXA_MIC * 10;      // 10 s
+static constexpr size_t MAX_AMOSTRAS = TAXA_MIC * 15;      // 15 s (~480 KB)
 static constexpr size_t BLOCO = 1024;                      // amostras por pedaço gravado
 static constexpr size_t MIN_AMOSTRAS = TAXA_MIC / 2;       // menos de 0,5 s = ignora
 // O áudio sobe como multipart/form-data: o buffer tem folga antes e depois do WAV
