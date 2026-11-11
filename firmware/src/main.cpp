@@ -11,6 +11,8 @@
 #include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
 #include <Preferences.h>
+#include <esp_sleep.h>
+#include <esp_sntp.h>
 #include "sprites.h"
 #include "sons.h"
 #if __has_include("sons_privados.h")
@@ -583,8 +585,10 @@ static constexpr uint32_t TELA_DORME_MS = 5000;      // pato dormindo: 5 s sem m
 static constexpr int BRILHO_NORMAL = 160, BRILHO_DESCANSO = 40, BRILHO_NOITE = 10;
 
 // ---------- noite ----------
-// Entre NOITE_INICIO e NOITE_FIM (horário de Brasília, via NTP) o pato dorme quando estaria parado.
-static constexpr int NOITE_INICIO = 21, NOITE_FIM = 7;  // 21h às 7h
+// Das NOITE_INICIO (horário de Brasília, via NTP) até de manhã o pato dorme quando estaria parado.
+// De manhã: seg-sex acorda no despertador; sáb/dom às FDS_ACORDA_HORA (ou antes, se chacoalhar).
+static constexpr int NOITE_INICIO = 21;     // 21h
+static constexpr int FDS_ACORDA_HORA = 8;   // fim de semana: 8h
 // ---------- despertador ----------
 // Segunda a sexta às DESPERTA_HORA:DESPERTA_MIN o pato acorda fazendo barulho.
 // Desliga tocando na tela ou em qualquer botão (ou sozinho depois de DESPERTA_MAX_MS).
@@ -599,14 +603,25 @@ static constexpr int DESPERTA_VOL_INI = 40, DESPERTA_VOL_FIM = 255;
 static constexpr int VOLUME_NORMAL = 160;
 static bool despertando = false;
 static uint32_t inicioDespertarMs = 0, ultimoQuackDespertarMs = 0;
-static int diaDespertou = -1;     // tm_yday do último despertar (não tocar 2x no mesmo dia)
-static int diaAcordou = -1;       // tm_yday em que o despertador foi desligado
+// RTC_DATA_ATTR: sobrevivem ao sono profundo (o ESP reinicia ao acordar)
+RTC_DATA_ATTR static int diaDespertou = -1;  // tm_yday do último despertar (não tocar 2x no mesmo dia)
+RTC_DATA_ATTR static int diaAcordou = -1;    // tm_yday em que acordou antes da hora (chacoalhou)
+
+static bool diaDeSemana(const struct tm& t) { return t.tm_wday >= 1 && t.tm_wday <= 5; }
+
+// minuto do dia (0-1439) em que a noite acaba nessa manhã
+static int fimDaNoiteMin(const struct tm& t) {
+  return diaDeSemana(t) ? DESPERTA_HORA * 60 + DESPERTA_MIN : FDS_ACORDA_HORA * 60;
+}
 
 static bool ehNoite() {
   struct tm t;
   if (!getLocalTime(&t, 0)) return false;  // ainda sem hora: considera dia
-  if (t.tm_yday == diaAcordou && t.tm_hour < NOITE_FIM) return false;  // já acordou pelo despertador
-  return t.tm_hour >= NOITE_INICIO || t.tm_hour < NOITE_FIM;  // atravessa a meia-noite
+  if (t.tm_hour >= NOITE_INICIO) return true;
+  if (t.tm_yday == diaAcordou) return false;  // chacoalhou de manhã: já acordou
+  // a noite acaba pelo relógio (não pelo despertador ter tocado): se o ESP reiniciar
+  // depois do despertador (ex. bateria acabou), o pato não volta a dormir
+  return t.tm_hour * 60 + t.tm_min < fimDaNoiteMin(t);
 }
 
 // o que o pato mostra quando não está fazendo nada
@@ -616,6 +631,63 @@ static Anim baseVisual() {
 
 static void voltaProBase(bool comSom) {
   mudaEstado(baseVisual(), comSom);
+}
+
+// ---------- sono profundo (noite, na bateria) ----------
+// De noite, sem ninguém mexer, o ESP32 entra em deep sleep (tela apagada, WiFi desligado).
+// Acorda com toque na tela ou pelo timer, perto da hora de acordar. Acordar = reiniciar
+// (o estado do pato mora no servidor). O relógio interno do sono deriva alguns %, então ele
+// dorme só 90% do que falta, acerta a hora pelo RTC (BM8563, de cristal) e dorme de novo;
+// faltando menos de SONO_MIN_S, fica acordado esperando.
+static constexpr uint32_t SONO_OCIOSO_MS = 60000;  // 1 min sem mexer de noite -> dorme
+static constexpr long SONO_MIN_S = 5 * 60;
+static constexpr long SONO_ANTECEDENCIA_S = 120;   // acorda 2 min antes do despertador (boot + WiFi)
+static constexpr uint32_t SONO_TESTE_S = 120;       // debug: botão B
+static constexpr const char* FUSO = "<-03>3";       // Brasília
+RTC_DATA_ATTR static bool sonoDeTeste = false;
+static volatile bool ntpAcertou = false;
+
+// segundos até o ESP precisar estar acordado (despertador - antecedência, ou 8h no fim de semana)
+static long segundosAteAcordar() {
+  time_t agora = time(nullptr);
+  struct tm hoje;
+  localtime_r(&agora, &hoje);
+  long melhor = 48L * 3600;
+  for (int d = 0; d <= 1; d++) {
+    struct tm a = hoje;
+    a.tm_mday += d;
+    a.tm_hour = 12; a.tm_min = 0; a.tm_sec = 0; a.tm_isdst = 0;
+    mktime(&a);  // normaliza o dia (e calcula tm_wday)
+    int fim = fimDaNoiteMin(a);
+    a.tm_hour = fim / 60; a.tm_min = fim % 60;
+    time_t alvo = mktime(&a);
+    if (alvo <= agora) continue;  // essa manhã já passou
+    long falta = (long)(alvo - agora) - (diaDeSemana(a) ? SONO_ANTECEDENCIA_S : 0);
+    if (falta < melhor) melhor = falta;
+  }
+  return melhor;
+}
+
+static bool naTomada() { return M5.Power.getVBUSVoltage() > 4000; }
+
+static void dormeProfundo(uint32_t segundos) {
+  Serial.printf("LOG sono profundo por %u s%s\n", segundos, sonoDeTeste ? " (teste)" : "");
+  Serial.flush();
+  luz(LUZ_APAGADA);
+  efeitosAtualiza(millis());  // apaga a barra de LEDs de verdade antes de dormir
+  M5.Speaker.end();
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_OFF);
+  M5.Display.setBrightness(0);
+  M5.Power.deepSleep((uint64_t)segundos * 1000000ULL, true);  // true = toque na tela acorda
+}
+
+// quanto dormir agora (0 = não dorme)
+static uint32_t quantoDormir() {
+  if (!ehNoite() || naTomada()) return 0;
+  long falta = segundosAteAcordar();
+  if (falta < SONO_MIN_S) return 0;
+  return (uint32_t)(falta * 9 / 10);
 }
 
 // ---------- telas ----------
@@ -1026,6 +1098,7 @@ static void desenhaPainelDebug() {
   linhas[n++] = "bateria: " + String(M5.Power.getBatteryLevel()) + "%" + (M5.Power.isCharging() ? " (carregando)" : "") +
                 "   hora: " + hora + (ehNoite() ? " (noite)" : "");
   linhas[n++] = "ligado ha " + String(millis() / 60000) + " min   psram livre: " + String(ESP.getFreePsram() / 1024) + " KB";
+  linhas[n++] = "B: dorme 2 min (teste)   C: despertador   sono em " + String(quantoDormir() ? "ON" : "off");
 
   canvas.fillRoundRect(4, 4, SCREEN_W - 8, n * 12 + 8, 6, TFT_BLACK);
   canvas.setFont(&fonts::Font0);
@@ -1250,7 +1323,28 @@ void setup() {
   cfg.serial_baudrate = 115200;
   M5.begin(cfg);
   Serial.begin(115200);
-  Serial.println("PATOGOCHI boot");
+
+  // hora do RTC (cristal, mais preciso que o relógio do sono); o NTP corrige depois
+  {
+    auto dt = M5.Rtc.getDateTime();
+    if (M5.Rtc.isEnabled() && dt.date.year >= 2025) M5.Rtc.setSystemTimeFromRtc();
+  }
+  setenv("TZ", FUSO, 1);
+  tzset();
+  auto acordou = esp_sleep_get_wakeup_cause();
+  if (acordou == ESP_SLEEP_WAKEUP_TIMER) {
+    // acordou só pra acertar a hora: se ainda falta muito, volta a dormir sem acender nada
+    M5.Display.setBrightness(0);
+    uint32_t s = sonoDeTeste ? 0 : quantoDormir();
+    if (s) {
+      Serial.printf("LOG acordou pelo timer, volta a dormir\n");
+      M5.Power.deepSleep((uint64_t)s * 1000000ULL, true);
+    }
+  }
+  sonoDeTeste = false;
+  Serial.printf("PATOGOCHI boot (%s)\n", acordou == ESP_SLEEP_WAKEUP_TIMER ? "timer"
+                                       : acordou == ESP_SLEEP_WAKEUP_EXT0 ? "toque" : "ligou");
+  if (acordou == ESP_SLEEP_WAKEUP_EXT0) travaToque = true;  // o toque que acordou não aperta nada
 
   canvas.setPsram(true);
   canvas.setColorDepth(16);
@@ -1267,7 +1361,8 @@ void setup() {
   enableLoopWDT();
 
   // hora certa (Brasília) pra saber quando é noite; sincroniza sozinho quando o WiFi conecta
-  configTzTime("<-03>3", "a.st1.ntp.br", "pool.ntp.org");
+  sntp_set_time_sync_notification_cb([](struct timeval*) { ntpAcertou = true; });
+  configTzTime(FUSO, "a.st1.ntp.br", "pool.ntp.org");
 
   WiFi.mode(WIFI_STA);
   xTaskCreatePinnedToCore(tarefaWifi, "wifi", 6144, nullptr, 1, nullptr, 0);
@@ -1426,6 +1521,10 @@ void loop() {
   bool ocupado = gravando || enviando;
   if (botoesLivres && !ocupado && telaNoInicio == TELA_PATO) {
     if (M5.BtnA.wasPressed()) { abreTela(TELA_TAREFAS); mudou = true; }
+    if (M5.BtnB.wasPressed() && modoDebug) {  // teste: dorme 2 min e acorda sozinho
+      sonoDeTeste = true;
+      dormeProfundo(SONO_TESTE_S);
+    }
     if (M5.BtnB.wasPressed()) { abreTela(TELA_STATUS); mudou = true; }
 
     auto toque = M5.Touch.getDetail();
@@ -1528,6 +1627,11 @@ void loop() {
           picos = 0;
           if (tela == TELA_PATO && ocioso() && estado != ANIM_TONTO) {
             Serial.println("LOG chacoalhou: pato tonto");
+            struct tm t;
+            if (ehNoite() && getLocalTime(&t, 0) && t.tm_hour < NOITE_INICIO) {
+              diaAcordou = t.tm_yday;  // de madrugada/manhã: acordou de vez (volta como parado)
+              Serial.println("LOG chacoalhou: pato acordou");
+            }
             mudaEstado(ANIM_TONTO);
             fimReacaoMs = agora + 4000;
             mudou = true;
@@ -1544,9 +1648,10 @@ void loop() {
     if (estadoBase == ANIM_MORTO && batidas == 0 && tela == TELA_PATO && agora % 60 < 15) mudou = true;  // coração pulando
   }
 
-  // ---- economia de bateria: tela fraca quando ninguém mexe ----
+  // ---- economia de bateria: tela fraca quando ninguém mexe; de noite, sono profundo ----
   {
     static uint32_t ultimaInteracaoMs = 0;
+    static uint32_t ultimaChecagemSonoMs = 0;
     static int brilhoAtual = -1;
     if (M5.Touch.getCount() > 0 || gravando || enviando || batidas > 0 || !ocioso() || despertando ||
         tela != TELA_PATO || ultimaInteracaoMs == 0) {
@@ -1560,6 +1665,22 @@ void loop() {
       M5.Display.setBrightness(brilho);
       brilhoAtual = brilho;
     }
+    if (semMexer > SONO_OCIOSO_MS && !modoDebug && !consultando && !despertando && !respostaPronta &&
+        agora - ultimaChecagemSonoMs > 5000) {
+      ultimaChecagemSonoMs = agora;
+      uint32_t s = quantoDormir();
+      if (s) dormeProfundo(s);
+    }
+  }
+
+  // NTP acertou a hora: grava no RTC (em UTC) pra usar ao acordar do sono
+  if (ntpAcertou) {
+    ntpAcertou = false;
+    time_t t = time(nullptr);
+    struct tm utc;
+    gmtime_r(&t, &utc);
+    if (M5.Rtc.isEnabled()) M5.Rtc.setDateTime(&utc);
+    Serial.println("LOG hora do NTP gravada no RTC");
   }
 
   // ---- despertador ----

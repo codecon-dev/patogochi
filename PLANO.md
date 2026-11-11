@@ -15,7 +15,7 @@ Vídeo: "Criei um Tamagotchi que morre se eu parar de ter ideias" (É o Vibecoda
 │ C segurando → grava áudio (WAV 16 kHz)        │ ──────► │ POST /ideia.php   (whisper+Claude) │
 │ chacoalhar → tonto / massagem cardíaca (IMU)  │         │ POST /reviver.php (desculpa/massag)│
 │ quack, LEDs da base, vibração                 │ ◄────── │ GET  /estado.php  (a cada 10 s)    │
-│ dorme 21h–7h, tela fraca parada               │  JSON   │ GET  /lembretes.php, /marcar-feito │
+│ dorme 21h–6h15 (fds 8h), deep sleep à noite   │  JSON   │ GET  /lembretes.php, /marcar-feito │
 └───────────────────────────────────────────────┘         │ cron: fome cai, lembrete vira cocô │
                                                           └────────────────────────────────────┘
 ```
@@ -43,6 +43,7 @@ Barra de ícones embaixo, um por botão:
 - **Toque no pato:** quack. **Chacoalhar:** pato tonto.
 - **Segurar no pato 10 s:** painel de debug (WiFi, IP, servidor, fome, hora, última gravação/resposta/erro, bateria, memória).
 - **Despertador:** seg–sex 6:15, o pato acorda fazendo quack feliz com luzes, vibração e o relógio piscando. Toque na tela ou qualquer botão desliga. Teste: painel de debug aberto + toque curto no C.
+- **Sono profundo:** de noite, na bateria, 1 min sem mexer -> deep sleep (tela e WiFi desligados). Toque na tela acorda; o timer acorda 2 min antes do despertador (sáb/dom: 8h), passando pelo RTC pra acertar a hora no meio. Na tomada não dorme. Teste: painel de debug + B (dorme 2 min).
 - Nenhum texto de opinião na tela: o pato só reage.
 
 ---
@@ -59,7 +60,7 @@ Barra de ícones embaixo, um por botão:
 | `debochando` | 3 | Ideia meh / minhoca / erro | quack normal | apagadas | curta |
 | `passando_mal` | 46 | Comida estragada (10 min) | quack enjoado (lento) | vermelho rápido | longa |
 | `triste_fome` | 61 | Fome (hp) abaixo de 30 | quack choroso | vermelho fraco | — |
-| `dormindo` | 2 | 21h–7h, quando estaria parado (fundo roxo com estrelas) | — | apagadas | — |
+| `dormindo` | 2 | 21h até o despertador (seg–sex 6:15; sáb/dom 8h ou chacoalhando), quando estaria parado (fundo roxo com estrelas) | — | apagadas | — |
 | `morto` | 1 | Único estado que vem do servidor (`sprite: morto`) | quack de morte | apagadas | bem longa |
 | `tonto` | 6 | Chacoalhou o pato vivo (4 s) | quack enjoado | azul girando | longa |
 | `lapide` | 1 | Tela de status, com o nº de mortes | | | |

@@ -40,7 +40,7 @@ Barra de ícones embaixo da tela, um por botão:
 - **Despertador:** seg–sex 6:15, quack feliz + luzes + vibração + relógio piscando. Toque na tela ou qualquer botão desliga (para sozinho em 10 min). Teste: com o painel de debug aberto, toque curto no C.
 - **Segurar no pato 10 s:** liga/desliga o painel de debug (WiFi, IP, servidor, fome, hora, última gravação/resposta/erro, bateria)
 
-Sozinho: tela fica fraca depois de 1 min sem mexer, pato dorme entre 21h e 7h (fundo roxo com estrelas), cocôs = lembretes vencidos (vem do servidor), bateria piscando abaixo de 20%.
+Sozinho: tela fica fraca depois de 1 min sem mexer, pato dorme das 21h até o despertador (sáb/dom até 8h ou chacoalhar; fundo roxo com estrelas) e, na bateria, o Core2 entra em sono profundo (toque na tela acorda), cocôs = lembretes vencidos (vem do servidor), bateria piscando abaixo de 20%.
 
 ## WiFi e servidor
 
