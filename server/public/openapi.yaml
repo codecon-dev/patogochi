@@ -6,9 +6,10 @@ info:
     só desenha o sprite e envia ideias.
 
     **Regras principais** ([PLANO.md](https://github.com/codecon-dev/patogochi/blob/main/PLANO.md)):
-    - Fome 0-100, decai ~4/h → cheio a vazio em ~25h.
-    - Ideia boa `+30` de fome. Ideia ruim `+5` + `passando_mal` por 10 min.
-    - Fome=0 por 12h → `morto`.
+    - Fome 0-100, **decai ~33/h de dia (07-20h), ~8/h de noite (21-06h)** → cheio a vazio em ~3h de dia.
+    - Ideia boa `+30` → `empolgado`. Ideia meh `+15` → `debochando`. Ideia ruim `+5` → `passando_mal` por 10 min.
+    - **Lembrete NÃO alimenta** — só cria tarefa. Pato continua como estava.
+    - Fome=0 por **30 min** → `morto`.
     - Lembrete vencido → cocô na tela. Só sai ao marcar como feito.
   version: "0.1.0"
 servers:
@@ -71,18 +72,25 @@ paths:
   /ideia.php:
     post:
       tags: [ideia]
-      summary: Alimentar o pato com uma ideia (áudio ou texto)
+      summary: Enviar uma ideia (áudio ou texto) pro pato
       description: |
         Aceita áudio (multipart) OU texto (JSON). Se for áudio, whisper.cpp
-        transcreve em pt-BR antes de mandar pro Claude. Claude classifica em 1 dos 5 tipos
-        de comida e devolve uma opinião; se tiver prazo ("me lembra sexta"), vira lembrete.
+        transcreve em pt-BR antes de mandar pro Claude. Claude classifica em 1 dos 5 tipos.
 
         **Tipos de comida (sprite 16x16 no Core2):**
-        - `pipoca` — ideia de conteúdo/vídeo
-        - `moeda_chocolate` — ideia de negócio/dinheiro
-        - `biscoito_sorte` — só quando a ideia tem prazo (vira lembrete)
-        - `minhoca` — ideia sem pé nem cabeça (non-sense)
-        - `comida_estragada` — ideia ruim (pato passa mal por 10 min)
+
+        | Tipo | O que é | Efeito no pato |
+        |---|---|---|
+        | `pipoca` 🍿 | Ideia de vídeo/conteúdo | +30 HP → `empolgado` (ou +15 → `debochando` se meh) |
+        | `moeda_chocolate` 🍫 | Ideia de negócio/dinheiro | +30 HP → `empolgado` (ou +15 → `debochando` se meh) |
+        | `minhoca` 🐛 | Ideia bizarra, sem pé nem cabeça | +15 HP → `debochando` |
+        | `comida_estragada` 🥬 | Ideia ruim/clichê (uber de X, etc) | +5 HP → `passando_mal` 10 min |
+        | `biscoito_sorte` 🥠 | **Lembrete/tarefa** ("me lembra", "anota", "tenho que") | **Nada** — só cria lembrete. Vence → cocô na tela |
+
+        Palavras-chave que forçam lembrete: `me lembra`, `anota`, `anotar`,
+        `tenho que`, `preciso`, `nao esquecer`, `tarefa`, `pra fazer`.
+
+        Se o texto não tiver prazo explícito, o lembrete usa fim do dia atual.
       requestBody:
         required: true
         content:
@@ -90,14 +98,26 @@ paths:
             schema:
               $ref: '#/components/schemas/IdeiaInput'
             examples:
-              tecnica:
+              ideia_video:
+                summary: Ideia de vídeo → alimenta pato (+30 ou +15)
                 value:
-                  texto: "fazer um ESP32 que acende LED quando chega email"
+                  texto: "gravar um vídeo testando teclado com switches de banana"
                   origem: core2
-              com_prazo:
+              lembrete_com_prazo:
+                summary: Lembrete explícito → NÃO alimenta, só cria tarefa
                 value:
                   texto: "me lembra de pagar a energia até sexta"
                   origem: alexa
+              lembrete_sem_prazo:
+                summary: Lembrete sem data → prazo = fim do dia
+                value:
+                  texto: "anota aí tenho que ligar pro cliente"
+                  origem: web
+              ideia_ruim:
+                summary: Cliché → pato passa mal
+                value:
+                  texto: "uber mas pra sogra"
+                  origem: web
           multipart/form-data:
             schema:
               type: object
@@ -329,15 +349,18 @@ components:
       description: |
         Retorno enxuto — o Core2 já tem os sprites de comida e reação do pato.
         Nada de texto de opinião: o visual fala tudo.
+
+        **Importante:** quando `tipo` é `biscoito_sorte`, o `estado` mantém o valor
+        atual do pato (não vira `empolgado`). Lembrete é anotação, não comida.
       required: [tipo, estado]
       properties:
         tipo:
           type: string
           description: |
-            Qual comida 16x16 desenhar na tela.
+            Qual comida 16x16 desenhar na tela (ou ícone, no caso de lembrete).
             - `pipoca` → ideia de vídeo/conteúdo
             - `moeda_chocolate` → ideia de negócio/dinheiro
-            - `biscoito_sorte` → só quando tem prazo (vira lembrete)
+            - `biscoito_sorte` → lembrete/tarefa (não alimenta)
             - `minhoca` → ideia sem pé nem cabeça (bizarra, non-sense)
             - `comida_estragada` → ideia ruim (pato passa mal)
           enum: [pipoca, moeda_chocolate, minhoca, biscoito_sorte, comida_estragada]
@@ -345,16 +368,17 @@ components:
           type: string
           format: date-time
           nullable: true
-          description: ISO8601 se virou lembrete, senão null.
+          description: ISO8601 do lembrete (só quando `tipo=biscoito_sorte`). Senão null.
           example: "2026-11-15T18:00:00-03:00"
         estado:
           type: string
           description: |
-            Novo estado do pato logo após comer:
+            Estado do pato logo depois do request:
             - `empolgado` → ideia boa (asas abertas, olhos brilhando)
             - `debochando` → ideia meh ou minhoca (olha de lado, bico torto)
-            - `passando_mal` → comida_estragada (verde, espiral no olho, 10min)
-          enum: [empolgado, debochando, passando_mal]
+            - `passando_mal` → `comida_estragada` (verde, espiral no olho, 10 min)
+            - **Qualquer outro** (parado, triste_fome, etc) → `tipo=biscoito_sorte` (lembrete não mexe no pato)
+          enum: [empolgado, debochando, passando_mal, parado, ouvindo, pensando, comendo, triste_fome, dormindo, morto]
     Erro:
       type: object
       properties:

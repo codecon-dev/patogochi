@@ -5,16 +5,44 @@ require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/mqtt.php';
 require_once __DIR__ . '/alexa.php';
 
-// Constantes do jogo (PLANO.md)
-const FOME_DECAIMENTO_POR_HORA = 4.0;
-const FOME_BOOST_IDEIA_BOA     = 30;
-const FOME_BOOST_IDEIA_MEH     = 15;   // deboche: comeu mas meio sem graça
-const FOME_BOOST_IDEIA_RUIM    = 5;
-const FOME_LIMITE_TRISTE       = 30;
-const PASSANDO_MAL_DURACAO_S   = 600;   // 10 min
-const DEBOCHANDO_DURACAO_S     = 45;
-const EMPOLGADO_DURACAO_S      = 60;
-const MORRE_APOS_FOME_ZERO_S   = 12 * 3600;
+// Constantes do jogo (modo video — pato esvazia em 3h, morre 30 min depois)
+const FOME_DECAIMENTO_POR_HORA_DIA   = 33.3;   // 100 -> 0 em 3h
+const FOME_DECAIMENTO_POR_HORA_NOITE = 8.3;    // 1/4 do dia (pato dormindo)
+const SONO_HORA_INICIO               = 21;     // 21:00 (America/Sao_Paulo)
+const SONO_HORA_FIM                  = 7;      // 07:00
+const FOME_BOOST_IDEIA_BOA           = 30;
+const FOME_BOOST_IDEIA_MEH           = 15;
+const FOME_BOOST_IDEIA_RUIM          = 5;
+const FOME_LIMITE_TRISTE             = 30;
+const PASSANDO_MAL_DURACAO_S         = 600;    // 10 min
+const DEBOCHANDO_DURACAO_S           = 45;
+const EMPOLGADO_DURACAO_S            = 60;
+const MORRE_APOS_FOME_ZERO_S         = 30 * 60; // 30 min
+
+/**
+ * Calcula quantos "pontos de fome" o pato perdeu entre dois momentos,
+ * considerando que durante o sono (SONO_HORA_INICIO - SONO_HORA_FIM)
+ * o decaimento cai pro valor noturno.
+ *
+ * Integra em passos de 1 minuto pra não precisar fazer matemática chata
+ * com intervalos cruzando meia-noite.
+ */
+function fome_decaimento_no_intervalo(DateTimeImmutable $de, DateTimeImmutable $ate): float {
+    if ($ate <= $de) return 0.0;
+    $tz = new DateTimeZone('America/Sao_Paulo');
+    $cursor = $de->setTimezone($tz);
+    $fim    = $ate->setTimezone($tz);
+    $total = 0.0;
+    // passo de 60s — sobra de 1 ponto no final é desprezível
+    while ($cursor < $fim) {
+        $h = (int) $cursor->format('G');
+        $dormindo = $h >= SONO_HORA_INICIO || $h < SONO_HORA_FIM;
+        $taxa_h = $dormindo ? FOME_DECAIMENTO_POR_HORA_NOITE : FOME_DECAIMENTO_POR_HORA_DIA;
+        $total += $taxa_h / 60.0;  // 1 minuto
+        $cursor = $cursor->modify('+1 minute');
+    }
+    return $total;
+}
 
 /**
  * Le o pato, aplica decaimento de fome baseado em tempo, salva se mudou,
@@ -29,9 +57,9 @@ function pato_lido_com_decaimento(): array {
 
         $agora = new DateTimeImmutable('now');
         $ult   = new DateTimeImmutable($p['atualizado_em']);
-        $horas = max(0, ($agora->getTimestamp() - $ult->getTimestamp()) / 3600);
+        $decaimento = fome_decaimento_no_intervalo($ult, $agora);
 
-        $fome_nova = (int) max(0, $p['fome'] - round($horas * FOME_DECAIMENTO_POR_HORA));
+        $fome_nova = (int) max(0, $p['fome'] - round($decaimento));
         $estado    = $p['estado'];
         $estado_ate= $p['estado_ate'];
 
@@ -111,8 +139,16 @@ function estado_json(?array $p = null): array {
  * Aplica efeito da ideia classificada no pato.
  * $qualidade: 'boa' (empolgado) ou 'meh' (debochando). Ignorado para comida_estragada.
  * $texto_ideia: texto bruto da ideia (opcional) — se for comida_estragada, Alexa usa pra comentar.
+ *
+ * biscoito_sorte (lembrete) NÃO alimenta: só anota a tarefa, pato continua como estava.
+ * Retorna o pato sem mudanças.
  */
 function pato_alimenta(string $tipo, string $qualidade = 'boa', string $texto_ideia = ''): array {
+    // Lembrete não é comida — não afeta fome nem estado
+    if ($tipo === 'biscoito_sorte') {
+        return pato_lido_com_decaimento();
+    }
+
     if ($tipo === 'comida_estragada') {
         $estado = 'passando_mal';
         $boost  = FOME_BOOST_IDEIA_RUIM;
