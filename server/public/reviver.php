@@ -45,21 +45,27 @@ if ($metodo === 'desculpa') {
 
     $bin   = env('CLAUDE_BIN', 'claude');
     $model = env('CLAUDE_MODEL', 'claude-haiku-4-5');
-    // Prompt como tarefa de classificacao (nao roleplay, senao CLI recusa)
     $prompt = "Classifique o texto abaixo em UMA palavra (SIM ou NAO) de acordo com a sinceridade de um pedido de desculpas. "
             . "Criterios: SIM se o texto expressa arrependimento genuino com pelo menos 2 destes elementos: (a) admissao de culpa, (b) reconhecimento do dano causado, (c) promessa de mudanca. NAO caso contrario. "
             . "Responda EXATAMENTE uma palavra: SIM ou NAO.\n\nTexto: $texto";
+    // Timeout de 20s pra não segurar o /reviver se Claude travar.
+    // Se Claude falhar ou devolver bosta -> aceita (modo generoso).
     $cmd = sprintf(
-        '%s -p %s --model %s --output-format text 2>&1',
+        'timeout 20 %s -p %s --model %s --output-format text 2>&1',
         escapeshellcmd($bin), escapeshellarg($prompt), escapeshellarg($model)
     );
-    $r = strtoupper(trim(shell_exec($cmd) ?? ''));
-    // Aceita SIM no inicio OU em qualquer lugar da primeira linha (caso Claude adicione comentario)
+    $r_raw  = shell_exec($cmd);
+    $r      = strtoupper(trim((string) $r_raw));
     $primeira_linha = strtoupper(strtok($r, "\n") ?: '');
-    $aceito = str_starts_with($primeira_linha, 'SIM')
-           || str_contains($primeira_linha, ' SIM ')
-           || $primeira_linha === 'SIM.';
-    if (!$aceito) {
+
+    // FALLBACK GENEROSO: se Claude explicitamente disse NAO -> rejeita.
+    // Qualquer outra coisa (timeout, erro, resposta estranha, SIM) -> aceita.
+    $recusou_explicitamente =
+           $primeira_linha === 'NAO'
+        || $primeira_linha === 'NAO.'
+        || str_starts_with($primeira_linha, 'NAO ');
+
+    if ($recusou_explicitamente) {
         json_out([
             'ok' => false,
             'transcrito' => $audio_recebido,

@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Patogochi · Admin</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/png" href="/favicon.png">
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          bg:      '#0f0d14',
+          panel:   '#1a1626',
+          panel2:  '#251d36',
+          fg:      '#f0e9ff',
+          muted:   '#9d8fbd',
+          accent:  '#ffcc00',
+          danger:  '#ff6b8e',
+          ok:      '#6bff8e',
+          border:  '#3a2f52',
+          pipoca:           '#ffd27d',
+          moeda_chocolate:  '#c89b5a',
+          biscoito_sorte:   '#ffa8d9',
+          minhoca:          '#a3d977',
+          comida_estragada: '#7bbf4a',
+        },
+        fontFamily: {
+          mono: ['ui-monospace', 'SF Mono', 'Menlo', 'monospace'],
+        }
+      }
+    }
+  }
+</script>
+<style>
+  body { background: #0f0d14; color: #f0e9ff; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; }
+  img.pixel { image-rendering: pixelated; image-rendering: crisp-edges; }
+
+  .btn {
+    padding: 8px 12px; border-radius: 6px; font-weight: 500; font-size: 13px;
+    border: 1px solid #3a2f52; background: #251d36; color: #f0e9ff;
+    cursor: pointer; transition: all 0.1s; display: inline-flex; align-items: center;
+    justify-content: center; gap: 4px;
+  }
+  .btn:hover:not(:disabled) { background: #3a2f52; }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-primary { background: #ffcc00; color: #000; border-color: #ffcc00; }
+  .btn-primary:hover:not(:disabled) { background: #ffdb3e; }
+  .btn-ok      { background: #6bff8e; color: #000; border-color: #6bff8e; }
+  .btn-ok:hover:not(:disabled) { background: #8dffaa; }
+  .btn-danger  { background: #ff6b8e; color: #000; border-color: #ff6b8e; }
+  .btn-danger:hover:not(:disabled) { background: #ff8aa8; }
+
+  .input {
+    background: #0f0d14; border: 1px solid #3a2f52; border-radius: 4px;
+    padding: 6px 10px; font-family: ui-monospace, monospace; text-align: right;
+    color: #f0e9ff; width: 80px; min-width: 60px; max-width: 80px;
+    font-size: 13px; flex-shrink: 0;
+  }
+  .input:focus { outline: none; border-color: #ffcc00; }
+
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 500; }
+  .pill.pipoca           { background: rgba(255,210,125,0.2); color: #ffd27d; }
+  .pill.moeda_chocolate  { background: rgba(200,155,90,0.2); color: #c89b5a; }
+  .pill.biscoito_sorte   { background: rgba(255,168,217,0.2); color: #ffa8d9; }
+  .pill.minhoca          { background: rgba(163,217,119,0.2); color: #a3d977; }
+  .pill.comida_estragada { background: rgba(123,191,74,0.2); color: #7bbf4a; }
+
+  .campo-config {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    background: rgba(15,13,20,0.4); border-radius: 6px; padding: 10px 12px;
+    border: 1px solid transparent; min-width: 0; overflow: hidden;
+  }
+  .campo-config:hover { border-color: #3a2f52; }
+  .campo-config .label { font-size: 13px; min-width: 0; flex: 1; overflow: hidden; }
+  .campo-config .label small { display: block; font-size: 11px; color: #9d8fbd; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  input::placeholder { color: #5a4f78; }
+  select { background: #0f0d14; border: 1px solid #3a2f52; color: #f0e9ff; padding: 4px 8px; border-radius: 4px; font-size: 13px; }
+
+  table { width: 100%; font-size: 13px; border-collapse: collapse; }
+  table th { text-align: left; padding: 8px; font-size: 11px; text-transform: uppercase; color: #9d8fbd; border-bottom: 1px solid #3a2f52; font-weight: 500; }
+  table td { padding: 8px; border-bottom: 1px solid rgba(58,47,82,0.5); }
+  table tr:hover td { background: #251d36; }
+</style>
+</head>
+<body class="min-h-screen">
+
+<!-- Login overlay -->
+<div id="login-overlay" class="fixed inset-0 bg-bg flex items-center justify-center z-50 hidden">
+  <div class="bg-panel border-2 border-accent rounded-lg p-8 w-80 text-center">
+    <div class="text-5xl mb-4">🔒</div>
+    <h2 class="text-xl font-bold mb-4">ADMIN</h2>
+    <input id="login-user" class="w-full bg-bg border border-border rounded px-3 py-2 mb-2 text-center focus:outline-none focus:border-accent" placeholder="usuário" autocomplete="username">
+    <input id="login-pass" type="password" class="w-full bg-bg border border-border rounded px-3 py-2 mb-3 text-center focus:outline-none focus:border-accent" placeholder="senha" autocomplete="current-password">
+    <button id="login-btn" class="btn btn-primary w-full">ENTRAR</button>
+    <div id="login-erro" class="text-danger text-sm mt-2 min-h-[20px]"></div>
+  </div>
+</div>
+
+<!-- Header -->
+<header class="border-b-2 border-border bg-panel">
+  <div class="max-w-6xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+    <div class="flex items-center gap-3">
+      <img id="pato-sprite" src="/sprites/pato/parado.png" alt="pato" class="w-12 h-12 pixel">
+      <div>
+        <h1 class="text-lg font-bold tracking-wider">PATOGOCHI · ADMIN</h1>
+        <div class="text-xs text-muted">painel de controle do pato</div>
+      </div>
+    </div>
+    <div id="pato-status" class="flex flex-wrap items-center gap-4 bg-panel2 px-4 py-2 rounded-lg text-sm font-mono">
+      carregando…
+    </div>
+  </div>
+</header>
+
+<main class="max-w-6xl mx-auto p-4 grid gap-4 lg:grid-cols-3">
+
+  <!-- Coluna esquerda: ações + admins -->
+  <section class="space-y-4 lg:col-span-1">
+
+    <!-- Ações rápidas -->
+    <div class="bg-panel rounded-lg p-4 border border-border">
+      <h2 class="text-sm font-bold text-accent uppercase tracking-wider mb-3">🎮 Ações</h2>
+      <div class="grid grid-cols-2 gap-2">
+        <button class="btn btn-danger" data-acao="matar">💀 Matar</button>
+        <button class="btn btn-ok"     data-acao="reviver">✨ Reviver</button>
+        <button class="btn"            onclick="setarHp()">🎚️ Setar HP</button>
+        <button class="btn"            data-acao="zerar_cocos">🧼 Zerar Cocôs</button>
+      </div>
+      <div class="flex gap-2 mt-3 pt-3 border-t border-border">
+        <a href="/ideias" target="_blank" class="btn flex-1 text-center">🦆 Galeria</a>
+        <a href="/docs"   target="_blank" class="btn flex-1 text-center">📘 Swagger</a>
+      </div>
+    </div>
+
+    <!-- Admins -->
+    <div class="bg-panel rounded-lg p-4 border border-border">
+      <div class="flex justify-between items-center mb-3">
+        <h2 class="text-sm font-bold text-accent uppercase tracking-wider">👥 Admins</h2>
+        <button class="btn btn-primary text-xs" onclick="criarAdmin()">+ NOVO</button>
+      </div>
+      <div id="tabela-admins" class="space-y-1 text-sm">carregando…</div>
+      <button class="btn w-full mt-3 text-xs" onclick="trocarMinhaSenha()">🔑 Trocar minha senha</button>
+    </div>
+  </section>
+
+  <!-- Coluna central/direita: config + gráfico -->
+  <section class="space-y-4 lg:col-span-2">
+
+    <!-- Config -->
+    <div class="bg-panel rounded-lg p-4 border border-border">
+      <div class="flex justify-between items-center mb-3">
+        <h2 class="text-sm font-bold text-accent uppercase tracking-wider">⚙️ Config do Jogo</h2>
+        <button id="save-config" class="btn btn-primary">SALVAR TUDO</button>
+      </div>
+
+      <div class="space-y-4">
+        <div>
+          <div class="text-xs text-muted uppercase mb-2">Decaimento de fome</div>
+          <div id="grupo-decaimento" class="grid grid-cols-1 sm:grid-cols-2 gap-2"></div>
+        </div>
+        <div>
+          <div class="text-xs text-muted uppercase mb-2">Boosts por ideia</div>
+          <div id="grupo-boost" class="grid grid-cols-1 sm:grid-cols-3 gap-2"></div>
+        </div>
+        <div>
+          <div class="text-xs text-muted uppercase mb-2">Durações & limites</div>
+          <div id="grupo-duracao" class="grid grid-cols-1 sm:grid-cols-2 gap-2"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Gráfico HP -->
+    <div class="bg-panel rounded-lg p-4 border border-border">
+      <div class="flex justify-between items-center mb-3">
+        <h2 class="text-sm font-bold text-accent uppercase tracking-wider">📈 HP ao longo do tempo</h2>
+        <select id="historico-horas" onchange="carregarHistorico()" class="bg-bg border border-border rounded px-2 py-1 text-sm">
+          <option value="6">últimas 6h</option>
+          <option value="24" selected>últimas 24h</option>
+          <option value="72">últimos 3 dias</option>
+          <option value="168">últimos 7 dias</option>
+        </select>
+      </div>
+      <div class="h-64"><canvas id="chart-hp"></canvas></div>
+    </div>
+  </section>
+
+  <!-- Full-width: listas -->
+  <section class="lg:col-span-3">
+    <div class="bg-panel rounded-lg p-4 border border-border">
+      <div class="flex items-center justify-between gap-2 mb-3">
+        <h2 class="text-sm font-bold text-accent uppercase tracking-wider">📋 Conteúdo</h2>
+        <div class="flex gap-1">
+          <button class="btn btn-primary tab-btn text-xs" data-tab="ideias">IDEIAS</button>
+          <button class="btn tab-btn text-xs" data-tab="lembretes">LEMBRETES</button>
+          <button class="btn tab-btn text-xs" data-tab="mortes">MORTES</button>
+        </div>
+      </div>
+      <div id="tab-ideias"    class="tab-content"></div>
+      <div id="tab-lembretes" class="tab-content hidden"></div>
+      <div id="tab-mortes"    class="tab-content hidden"></div>
+    </div>
+  </section>
+
+</main>
+
+<!-- Toast -->
+<div id="toast" class="fixed bottom-4 right-4 bg-panel2 border border-accent px-4 py-2 rounded text-sm opacity-0 transition-all translate-y-4 z-50"></div>
+
+<script>
+let authHeader = sessionStorage.getItem('patogochi_admin_auth') || '';
+let chartHp = null;
+
+const CONFIG_LABELS = {
+  // decaimento
+  fome_decaimento_dia:   { grupo: 'decaimento', label: 'Decaimento dia',   hint: '/h · 07h-20h' },
+  fome_decaimento_noite: { grupo: 'decaimento', label: 'Decaimento noite', hint: '/h · 21h-06h' },
+  sono_hora_inicio:      { grupo: 'decaimento', label: 'Início do sono',   hint: '0-23' },
+  sono_hora_fim:         { grupo: 'decaimento', label: 'Fim do sono',      hint: '0-23' },
+  // boost
+  fome_boost_boa:  { grupo: 'boost', label: 'Ideia boa',  hint: '+hp, empolgado' },
+  fome_boost_meh:  { grupo: 'boost', label: 'Ideia meh',  hint: '+hp, debochando' },
+  fome_boost_ruim: { grupo: 'boost', label: 'Ideia ruim', hint: '+hp, passando_mal' },
+  // duracao/limites
+  fome_limite_triste:          { grupo: 'duracao', label: 'Limite triste',      hint: 'hp<N → triste_fome' },
+  morre_apos_fome_zero_s:      { grupo: 'duracao', label: 'Morte após fome 0',  hint: 's (1800=30min)' },
+  passando_mal_duracao_s:      { grupo: 'duracao', label: 'Dur. passando_mal',  hint: 's (600=10min)' },
+  debochando_duracao_s:        { grupo: 'duracao', label: 'Dur. debochando',    hint: 's' },
+  empolgado_duracao_s:         { grupo: 'duracao', label: 'Dur. empolgado',     hint: 's' },
+  invulneravel_apos_reviver_s: { grupo: 'duracao', label: 'Escudo pós-reviver', hint: 's (3600=1h)' },
+};
+
+async function api(path, options = {}) {
+  const headers = { ...(options.headers || {}), 'Authorization': authHeader };
+  if (options.body && typeof options.body === 'object') {
+    headers['content-type'] = 'application/json';
+    options.body = JSON.stringify(options.body);
+  }
+  const r = await fetch(path, { ...options, headers });
+  if (r.status === 401) {
+    sessionStorage.removeItem('patogochi_admin_auth');
+    mostrarLogin();
+    throw new Error('401');
+  }
+  return r.json();
+}
+
+function toast(msg, erro = false) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.toggle('border-danger', erro);
+  t.classList.toggle('text-danger', erro);
+  t.classList.toggle('border-accent', !erro);
+  t.classList.remove('opacity-0', 'translate-y-4');
+  t.classList.add('opacity-100', 'translate-y-0');
+  setTimeout(() => {
+    t.classList.add('opacity-0', 'translate-y-4');
+    t.classList.remove('opacity-100', 'translate-y-0');
+  }, 2500);
+}
+
+function mostrarLogin() { document.getElementById('login-overlay').classList.remove('hidden'); document.getElementById('login-user').focus(); }
+function esconderLogin() { document.getElementById('login-overlay').classList.add('hidden'); }
+function escapar(s) { const d = document.createElement('div'); d.textContent = s||''; return d.innerHTML; }
+function fmtData(iso) { return new Date(iso).toLocaleString('pt-BR', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}); }
+
+document.getElementById('login-btn').onclick = async () => {
+  const u = document.getElementById('login-user').value;
+  const p = document.getElementById('login-pass').value;
+  authHeader = 'Basic ' + btoa(`${u}:${p}`);
+  try {
+    await api('/admin/config.php');
+    sessionStorage.setItem('patogochi_admin_auth', authHeader);
+    esconderLogin();
+    carregar();
+  } catch {
+    document.getElementById('login-erro').textContent = 'credenciais inválidas';
+  }
+};
+document.getElementById('login-pass').onkeydown = e => { if (e.key === 'Enter') document.getElementById('login-btn').click(); };
+
+// --- CONFIG ---
+function renderCampo(k, atual, def) {
+  const meta = CONFIG_LABELS[k];
+  const alterado = String(atual) !== String(def);
+  return `
+    <label class="campo-config">
+      <span class="label">
+        ${meta.label}${alterado ? ' <span style="color:#ffcc00">●</span>' : ''}
+        <small>${meta.hint}</small>
+      </span>
+      <input id="cfg_${k}" name="${k}" value="${atual}" placeholder="${def}" class="input">
+    </label>
+  `;
+}
+
+async function carregarConfig() {
+  const data = await api('/admin/config.php');
+  const grupos = { decaimento: [], boost: [], duracao: [] };
+  for (const [k, meta] of Object.entries(CONFIG_LABELS)) {
+    const atual = data.config[k] ?? data.defaults[k] ?? '';
+    const def = data.defaults[k] ?? '';
+    grupos[meta.grupo].push(renderCampo(k, atual, def));
+  }
+  document.getElementById('grupo-decaimento').innerHTML = grupos.decaimento.join('');
+  document.getElementById('grupo-boost').innerHTML      = grupos.boost.join('');
+  document.getElementById('grupo-duracao').innerHTML    = grupos.duracao.join('');
+}
+
+document.getElementById('save-config').onclick = async () => {
+  const body = {};
+  for (const k of Object.keys(CONFIG_LABELS)) {
+    const el = document.getElementById(`cfg_${k}`);
+    if (el && el.value !== '') body[k] = el.value;
+  }
+  try {
+    const r = await api('/admin/config.php', { method: 'POST', body });
+    toast(`${Object.keys(r.atualizadas).length} configs atualizadas`);
+    await carregarConfig();
+  } catch { toast('erro ao salvar', true); }
+};
+
+// --- AÇÕES ---
+document.querySelectorAll('[data-acao]').forEach(btn => {
+  btn.onclick = async () => {
+    const acao = btn.dataset.acao;
+    if (acao === 'matar' && !confirm('Matar o pato?')) return;
+    if (acao === 'zerar_cocos' && !confirm('Marcar TODOS os cocôs como feitos?')) return;
+    btn.disabled = true;
+    try {
+      await api('/admin/acao.php', { method: 'POST', body: { acao } });
+      toast(`${acao} ok`);
+      await carregarStatus();
+      await carregarListas();
+    } catch { toast('erro', true); }
+    finally { btn.disabled = false; }
+  };
+});
+
+async function setarHp() {
+  const hp = prompt('HP (0-100):', '100');
+  if (hp === null) return;
+  try {
+    await api('/admin/acao.php', { method: 'POST', body: { acao: 'setar_hp', hp: parseInt(hp) } });
+    toast(`HP = ${hp}`);
+    await carregarStatus();
+  } catch { toast('erro', true); }
+}
+
+// --- STATUS (sprite correto por estado) ---
+const ESTADO_FALLBACK = {
+  // alguns estados compostos → sprite mais próximo
+  parado: 'parado', empolgado: 'empolgado', debochando: 'debochando',
+  passando_mal: 'passando_mal', triste_fome: 'triste_fome',
+  dormindo: 'dormindo', morto: 'morto', ouvindo: 'ouvindo',
+  pensando: 'pensando', comendo: 'comendo',
+};
+
+async function carregarStatus() {
+  const r = await fetch('/estado.php');
+  const p = await r.json();
+  const spriteNome = ESTADO_FALLBACK[p.estado] || 'parado';
+  const img = document.getElementById('pato-sprite');
+  const novoSrc = `/sprites/pato/${spriteNome}.png`;
+  if (!img.src.endsWith(novoSrc)) img.src = novoSrc;
+
+  // cor da barra por faixa
+  const hp = Math.max(0, Math.min(100, p.hp));
+  const cor = hp >= 60 ? '#6bff8e'   // verde
+            : hp >= 30 ? '#ffcc00'   // amarelo
+                        : '#ff6b8e'; // vermelho
+  const sombra = hp < 30 ? `box-shadow: 0 0 8px ${cor};` : '';
+
+  document.getElementById('pato-status').innerHTML = `
+    <div style="display:flex;align-items:center;gap:8px;min-width:160px">
+      <span style="color:#9d8fbd;font-size:12px">HP</span>
+      <div style="flex:1;position:relative;height:16px;background:#0f0d14;border:1px solid #3a2f52;border-radius:8px;overflow:hidden">
+        <div style="position:absolute;inset:0;width:${hp}%;background:${cor};${sombra}transition:width 0.4s ease, background 0.4s ease"></div>
+        <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#000;text-shadow:0 0 2px rgba(255,255,255,0.6);mix-blend-mode:difference;color:#fff">${p.hp}/100</div>
+      </div>
+    </div>
+    <div><span style="color:#9d8fbd;font-size:12px">estado</span> <b>${p.estado}</b></div>
+    <div><span style="color:#9d8fbd;font-size:12px">💩</span> <b>${p.coco}</b></div>
+    <div><span style="color:#9d8fbd;font-size:12px">💀</span> <b>${p.mortes}</b></div>
+    <div style="color:#9d8fbd;font-size:11px">v${p.versao}</div>
+  `;
+}
+
+// --- HISTÓRICO ---
+async function carregarHistorico() {
+  const horas = document.getElementById('historico-horas').value;
+  const data = await api(`/admin/historico.php?horas=${horas}`);
+  const labels = data.pontos.map(p => new Date(p.criado_em).toLocaleString('pt-BR', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}));
+  const valores = data.pontos.map(p => p.fome);
+  if (chartHp) chartHp.destroy();
+  chartHp = new Chart(document.getElementById('chart-hp').getContext('2d'), {
+    type: 'line',
+    data: { labels, datasets: [{ label: 'HP', data: valores,
+      borderColor: '#ffcc00', backgroundColor: 'rgba(255,204,0,0.15)',
+      fill: true, tension: 0.2, pointRadius: 0, borderWidth: 2,
+    }] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        y: { min: 0, max: 100, grid: { color: '#3a2f5255' }, ticks: { color: '#9d8fbd' } },
+        x: { grid: { color: '#3a2f5522' }, ticks: { color: '#9d8fbd', maxTicksLimit: 10, maxRotation: 0 } }
+      }
+    }
+  });
+}
+
+// --- LISTAS (paginadas) ---
+const paginas = { ideias: 1, lembretes: 1, mortes: 1 };
+const POR_PAGINA = 20;
+
+async function carregarRecurso(recurso) {
+  const pg = paginas[recurso];
+  const data = await api(`/admin/listas.php?recurso=${recurso}&pagina=${pg}&por_pagina=${POR_PAGINA}`);
+  const total = data[`${recurso}_total`] || 0;
+  const total_paginas = Math.max(1, Math.ceil(total / POR_PAGINA));
+  if (recurso === 'ideias')    renderIdeias(data.ideias);
+  if (recurso === 'lembretes') renderLembretes(data.lembretes);
+  if (recurso === 'mortes')    renderMortes(data.mortes);
+  renderPaginador(recurso, pg, total_paginas, total);
+}
+
+async function carregarListas() {
+  await Promise.all([
+    carregarRecurso('ideias'),
+    carregarRecurso('lembretes'),
+    carregarRecurso('mortes'),
+  ]);
+}
+
+function renderPaginador(recurso, pagina, total_paginas, total) {
+  const container = document.getElementById(`tab-${recurso}`);
+  const existente = container.querySelector('.paginador');
+  if (existente) existente.remove();
+  const nav = document.createElement('div');
+  nav.className = 'paginador';
+  nav.style.cssText = 'display:flex; justify-content:space-between; align-items:center; gap:8px; padding:12px 0 0;';
+  nav.innerHTML = `
+    <div style="color:#9d8fbd;font-size:12px">
+      ${total} total · página <b style="color:#ffcc00">${pagina}</b>/${total_paginas}
+    </div>
+    <div style="display:flex;gap:6px">
+      <button class="btn" ${pagina<=1?'disabled':''} onclick="irPagina('${recurso}',1)">« início</button>
+      <button class="btn" ${pagina<=1?'disabled':''} onclick="irPagina('${recurso}',${pagina-1})">‹ anterior</button>
+      <button class="btn" ${pagina>=total_paginas?'disabled':''} onclick="irPagina('${recurso}',${pagina+1})">próxima ›</button>
+      <button class="btn" ${pagina>=total_paginas?'disabled':''} onclick="irPagina('${recurso}',${total_paginas})">fim »</button>
+    </div>
+  `;
+  container.appendChild(nav);
+}
+
+async function irPagina(recurso, nova) {
+  paginas[recurso] = nova;
+  await carregarRecurso(recurso);
+}
+
+function renderIdeias(ideias) {
+  const el = document.getElementById('tab-ideias');
+  el.innerHTML = `
+    <div style="overflow-x:auto">
+    <table class="w-full text-sm">
+      <thead class="text-muted text-[11px] uppercase">
+        <tr class="border-b border-border">
+          <th class="text-left py-2 px-2">ID</th>
+          <th class="text-left py-2 px-2">Texto</th>
+          <th class="text-left py-2 px-2">Tipo</th>
+          <th class="text-left py-2 px-2">Origem</th>
+          <th class="text-right py-2 px-2">Score</th>
+          <th class="text-left py-2 px-2">Quando</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>${ideias.map(i => `
+        <tr class="border-b border-border/50 hover:bg-panel2">
+          <td class="py-2 px-2 font-mono text-muted">${i.id}</td>
+          <td class="py-2 px-2">${escapar(i.texto)}</td>
+          <td class="py-2 px-2"><span class="pill bg-${i.tipo}/20 text-${i.tipo}">${i.tipo}</span></td>
+          <td class="py-2 px-2 text-muted">${i.origem}</td>
+          <td class="py-2 px-2 text-right font-mono ${i.score>0?'text-ok':i.score<0?'text-danger':'text-muted'}">${i.score>0?'+':''}${i.score}</td>
+          <td class="py-2 px-2 text-muted text-xs">${fmtData(i.criada_em)}</td>
+          <td class="py-2 px-2 text-right"><button class="btn btn-danger text-xs" onclick="deletarIdeia(${i.id})">🗑</button></td>
+        </tr>
+      `).join('')}</tbody>
+    </table>
+    </div>`;
+}
+
+async function deletarIdeia(id) {
+  if (!confirm(`Deletar ideia #${id}?`)) return;
+  try {
+    await api('/admin/acao.php', { method: 'POST', body: { acao: 'delete_ideia', ideia_id: id } });
+    toast(`ideia #${id} deletada`);
+    await carregarListas();
+  } catch { toast('erro', true); }
+}
+
+function renderLembretes(lembretes) {
+  const el = document.getElementById('tab-lembretes');
+  el.innerHTML = `
+    <div style="overflow-x:auto">
+    <table class="w-full text-sm">
+      <thead class="text-muted text-[11px] uppercase">
+        <tr class="border-b border-border">
+          <th class="text-left py-2 px-2">ID</th>
+          <th class="text-left py-2 px-2">Tarefa</th>
+          <th class="text-left py-2 px-2">Prazo</th>
+          <th class="text-left py-2 px-2">Status</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>${lembretes.map(l => {
+        const status = l.feito_em ? '✓ feito' : (l.virou_coco ? '💩 cocô' : '⏳ pendente');
+        const color  = l.feito_em ? 'text-muted' : (l.virou_coco ? 'text-danger' : 'text-accent');
+        return `
+          <tr class="border-b border-border/50 hover:bg-panel2">
+            <td class="py-2 px-2 font-mono text-muted">${l.id}</td>
+            <td class="py-2 px-2">${escapar(l.texto)}</td>
+            <td class="py-2 px-2 text-muted text-xs">${fmtData(l.prazo)}</td>
+            <td class="py-2 px-2 ${color}">${status}</td>
+            <td class="py-2 px-2 text-right">${!l.feito_em ? `<button class="btn btn-ok text-xs" onclick="marcarLembrete(${l.id})">✓</button>` : ''}</td>
+          </tr>
+        `;
+      }).join('')}</tbody>
+    </table>`;
+}
+
+async function marcarLembrete(id) {
+  try {
+    await api('/admin/acao.php', { method: 'POST', body: { acao: 'marcar_lembrete', lembrete_id: id } });
+    toast(`lembrete #${id} feito`);
+    await carregarListas();
+  } catch { toast('erro', true); }
+}
+
+function renderMortes(mortes) {
+  const el = document.getElementById('tab-mortes');
+  el.innerHTML = `
+    <div style="overflow-x:auto">
+    <table class="w-full text-sm">
+      <thead class="text-muted text-[11px] uppercase">
+        <tr class="border-b border-border">
+          <th class="text-left py-2 px-2">#</th>
+          <th class="text-left py-2 px-2">Morreu</th>
+          <th class="text-left py-2 px-2">Reviveu</th>
+          <th class="text-left py-2 px-2">Obituário</th>
+        </tr>
+      </thead>
+      <tbody>${mortes.map(m => `
+        <tr class="border-b border-border/50 hover:bg-panel2">
+          <td class="py-2 px-2 font-mono text-muted">${m.id}</td>
+          <td class="py-2 px-2 text-muted text-xs">${fmtData(m.morreu_em)}</td>
+          <td class="py-2 px-2 text-muted text-xs">${m.reviveu_em ? fmtData(m.reviveu_em) : '—'}</td>
+          <td class="py-2 px-2 text-xs italic">${escapar(m.obituario)}…</td>
+        </tr>
+      `).join('')}</tbody>
+    </table>
+    </div>`;
+}
+
+// Tabs
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.onclick = () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('btn-primary'));
+    btn.classList.add('btn-primary');
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.add('hidden'));
+    document.getElementById('tab-' + btn.dataset.tab).classList.remove('hidden');
+  };
+});
+
+// --- ADMINS ---
+async function carregarAdmins() {
+  const data = await api('/admin/admins.php');
+  const el = document.getElementById('tabela-admins');
+  el.innerHTML = data.admins.map(a => `
+    <div class="flex items-center justify-between py-1 ${a.username === data.logado ? 'bg-panel2 rounded px-2' : ''}">
+      <div>
+        <span>${escapar(a.username)}</span>
+        ${a.username === data.logado ? '<span class="text-accent text-xs ml-1">(você)</span>' : ''}
+        <div class="text-[11px] text-muted">${fmtData(a.criado_em)}</div>
+      </div>
+      ${a.username !== data.logado ? `<button class="btn btn-danger text-xs" onclick="removerAdmin('${a.username}')">🗑</button>` : ''}
+    </div>
+  `).join('');
+}
+
+async function criarAdmin() {
+  const u = prompt('Username do novo admin:');
+  if (!u) return;
+  const p = prompt(`Senha pra ${u} (mínimo 8):`);
+  if (!p) return;
+  try {
+    await api('/admin/admins.php', { method: 'POST', body: { acao: 'criar', username: u, password: p } });
+    toast(`admin ${u} criado`);
+    await carregarAdmins();
+  } catch (e) { toast('erro: ' + e.message, true); }
+}
+
+async function removerAdmin(u) {
+  if (!confirm(`Remover admin ${u}?`)) return;
+  try {
+    await api('/admin/admins.php', { method: 'POST', body: { acao: 'remover', username: u } });
+    toast(`${u} removido`);
+    await carregarAdmins();
+  } catch (e) { toast('erro: ' + e.message, true); }
+}
+
+async function trocarMinhaSenha() {
+  const p = prompt('Nova senha (mínimo 8):');
+  if (!p || p.length < 8) return toast('senha curta', true);
+  try {
+    await api('/admin/admins.php', { method: 'POST', body: { acao: 'trocar_senha', password: p } });
+    toast('senha trocada. próximo login vai pedir a nova.');
+  } catch (e) { toast('erro: ' + e.message, true); }
+}
+
+async function carregar() {
+  const funcs = [carregarConfig, carregarStatus, carregarHistorico, carregarListas, carregarAdmins];
+  const results = await Promise.allSettled(funcs.map(f => f()));
+  results.forEach((r, i) => {
+    if (r.status === 'rejected') console.error(`[${funcs[i].name}] falhou:`, r.reason);
+  });
+}
+
+async function boot() {
+  if (!authHeader) { mostrarLogin(); return; }
+  try {
+    const r = await fetch('/admin/config.php', { headers: { 'Authorization': authHeader } });
+    if (r.status === 401) { sessionStorage.removeItem('patogochi_admin_auth'); mostrarLogin(); return; }
+    await carregar();
+  } catch (e) { console.error('boot falhou:', e); }
+}
+boot();
+setInterval(carregarStatus, 3000);
+</script>
+</body>
+</html>

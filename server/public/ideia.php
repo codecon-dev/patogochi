@@ -46,6 +46,11 @@ if ($pato && $pato['estado'] === 'morto') {
 
 $class = claude_classifica_ideia($texto);
 
+// Preferencia: titulo limpo > texto corrigido > texto bruto
+$texto_final = !empty($class['titulo'])
+    ? $class['titulo']
+    : (!empty($class['texto_corrigido']) ? $class['texto_corrigido'] : $texto);
+
 // salva ideia (opiniao NULL, mantido NOT NULL no schema entao salvamos string vazia)
 $stmt = db()->prepare('
     insert into ideias (origem, texto, tipo, opiniao, prazo)
@@ -54,16 +59,16 @@ $stmt = db()->prepare('
 ');
 $stmt->execute([
     'o'  => $origem,
-    't'  => $texto,
+    't'  => $texto_final,
     'tp' => $class['tipo'],
     'op' => '',
     'pz' => $class['prazo'],
 ]);
 $ideia_id = (int) $stmt->fetchColumn();
 
-// prazo vira lembrete (usa titulo limpo do Claude se tiver; senao texto bruto)
+// prazo vira lembrete (usa titulo limpo do Claude se tiver; senao texto corrigido)
 if (!empty($class['prazo'])) {
-    $texto_lembrete = !empty($class['titulo']) ? $class['titulo'] : $texto;
+    $texto_lembrete = !empty($class['titulo']) ? $class['titulo'] : $texto_final;
     db()->prepare('
         insert into lembretes (ideia_id, texto, prazo)
         values (:i, :t, :p)

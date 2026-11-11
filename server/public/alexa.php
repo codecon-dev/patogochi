@@ -112,22 +112,25 @@ function alexa_alimentar(array $slots): array {
     }
 
     $class = claude_classifica_ideia($texto);
+    $texto_final = !empty($class['titulo'])
+        ? $class['titulo']
+        : (!empty($class['texto_corrigido']) ? $class['texto_corrigido'] : $texto);
 
     db()->prepare('
         insert into ideias (origem, texto, tipo, opiniao, prazo)
         values (:o, :t, :tp, :op, :pz) returning id
     ')->execute([
-        'o'=>'alexa', 't'=>$texto, 'tp'=>$class['tipo'], 'op'=>'', 'pz'=>$class['prazo'],
+        'o'=>'alexa', 't'=>$texto_final, 'tp'=>$class['tipo'], 'op'=>'', 'pz'=>$class['prazo'],
     ]);
     $ideia_id = (int) db()->lastInsertId('ideias_id_seq');
 
     if (!empty($class['prazo'])) {
-        $texto_lembrete = !empty($class['titulo']) ? $class['titulo'] : $texto;
+        $texto_lembrete = !empty($class['titulo']) ? $class['titulo'] : $texto_final;
         db()->prepare('insert into lembretes (ideia_id, texto, prazo) values (:i,:t,:p)')
             ->execute(['i'=>$ideia_id, 't'=>$texto_lembrete, 'p'=>$class['prazo']]);
     }
 
-    pato_alimenta($class['tipo'], $class['qualidade'], $texto);
+    pato_alimenta($class['tipo'], $class['qualidade'], $texto_final);
 
     $frase = match ($class['tipo']) {
         'pipoca'           => 'Comi uma pipoca. Boa ideia.',

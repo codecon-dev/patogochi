@@ -25,9 +25,13 @@ function claude_classifica_ideia(string $texto): array {
     $fim_do_dia = (new DateTimeImmutable('today 23:59:59', $tz))->format('c');
 
     $prompt = <<<PROMPT
-Voce classifica ideias de um dev em UMA das 5 categorias abaixo.
+Voce recebe um TEXTO transcrito de audio (pode ter erros de transcricao) e precisa:
+1. CORRIGIR erros obvios de transcricao (ex: "necrotivo"->"objetivo", "rarquear"->"rankear", "lembreite"->"lembrete")
+   baseado no contexto da frase. Se nao tiver certeza, deixe como esta.
+2. CLASSIFICAR a ideia corrigida em UMA das 5 categorias abaixo.
+
 Responda APENAS com JSON puro, sem markdown, sem cercas, sem explicacao:
-{"tipo":"...","prazo":null,"qualidade":"boa","titulo":null}
+{"tipo":"...","prazo":null,"qualidade":"boa","titulo":null,"texto_corrigido":"..."}
 
 Categorias (tipo):
 - pipoca           ideia de video/conteudo (gravar algo, publicar, roteiro, youtube, tiktok, live)
@@ -51,19 +55,26 @@ REGRA DO PRAZO (preencha o campo "prazo" ISO8601):
 - Se biscoito_sorte SEM prazo explicito: use "$fim_do_dia" (fim do dia atual)
 - Outros tipos: prazo null
 
-REGRA DO TITULO (so preencha quando for biscoito_sorte):
-- Extraia a ESSENCIA da tarefa, limpo e curto (max 50 chars), imperativo
-- Remova palavras de preenchimento: "me lembra de", "tenho que", "é", "hum", "pra eu", "o lembrete de", etc
+REGRA DO TITULO (SEMPRE preencha, para todos os tipos):
+- Extraia a ESSENCIA da ideia, limpa e curta (max 90 chars), direto ao ponto
+- Remova palavras de apresentacao e preenchimento, mantendo so o conteudo real:
+  * "a minha ideia de video é", "outro desafio que eu quero fazer e", "a ideia que eu tenho é"
+  * "me lembra de", "tenho que", "preciso", "nao esquecer de", "anota ai"
+  * "é", "hum", "entao", "tipo", "pra eu", "o lembrete de"
 - Remova referencias de tempo que ja estao no prazo
-- Remova pontos finais
+- Remova pontos finais soltos
+- Para lembretes (biscoito_sorte), use voz imperativa ("Comprar pão")
+- Para ideias de video/negocio/minhoca, use descricao direta ("Programar com API do WhatsApp")
 
 Exemplos:
   "me lembra de comprar pão amanha" -> {"titulo":"Comprar pão","prazo":"<amanha>"}
-  "lembrete: enviar relatório pra Logiteque" -> {"titulo":"Enviar relatório pra Logiteque","prazo":"<fim do dia>"}
+  "lembrete: enviar relatório pra Logiteque" -> {"titulo":"Enviar relatório pra Logiteque"}
   "tenho que ligar pro cliente sexta-feira as 9h" -> {"titulo":"Ligar pro cliente","prazo":"<sexta 9h>"}
-  "é a nota do lembrete para eu buscar ali mais tarde na quinta" -> {"titulo":"Buscar ali","prazo":"<quinta>"}
-
-Outros tipos (pipoca, moeda_chocolate, minhoca, comida_estragada): titulo null (nao usamos).
+  "A minha ideia de video é fazer um desafio programando usando IA" -> {"titulo":"Desafio programando usando IA"}
+  "Outro desafio que eu quero fazer pro YouTube é se dá para programar usando a API WhatsApp" -> {"titulo":"Programar usando a API do WhatsApp"}
+  "A ideia é fazer um video com 3 seniors contra 3 juniors bebados" -> {"titulo":"3 seniors contra 3 juniors bebados"}
+  "fazer um video sobre teclado mecanico" -> {"titulo":"Video sobre teclado mecanico"}
+  "uber mas pra sogra" -> {"titulo":"Uber pra sogra"}
 
 REGRA DE OURO: Respeite a intencao do dev. "me lembra" / "lembrar" / "tarefa" / "tenho que" sao SEMPRE biscoito_sorte, mesmo se o conteudo for de video ou negocio.
 
@@ -108,10 +119,13 @@ PROMPT;
                 'titulo'    => isset($json['titulo']) && is_string($json['titulo']) && $json['titulo'] !== ''
                                ? trim($json['titulo'])
                                : null,
+                'texto_corrigido' => isset($json['texto_corrigido']) && is_string($json['texto_corrigido']) && $json['texto_corrigido'] !== ''
+                                     ? trim($json['texto_corrigido'])
+                                     : null,
             ];
         }
     }
 
     // Fallback: trata como minhoca
-    return ['tipo' => 'minhoca', 'prazo' => null, 'qualidade' => 'meh'];
+    return ['tipo' => 'minhoca', 'prazo' => null, 'qualidade' => 'meh', 'titulo' => null, 'texto_corrigido' => null];
 }

@@ -2,22 +2,12 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/mqtt.php';
 require_once __DIR__ . '/alexa.php';
 
-// Constantes do jogo (modo video — pato esvazia em 3h, morre 30 min depois)
-const FOME_DECAIMENTO_POR_HORA_DIA   = 33.3;   // 100 -> 0 em 3h
-const FOME_DECAIMENTO_POR_HORA_NOITE = 8.3;    // 1/4 do dia (pato dormindo)
-const SONO_HORA_INICIO               = 21;     // 21:00 (America/Sao_Paulo)
-const SONO_HORA_FIM                  = 7;      // 07:00
-const FOME_BOOST_IDEIA_BOA           = 30;
-const FOME_BOOST_IDEIA_MEH           = 15;
-const FOME_BOOST_IDEIA_RUIM          = 5;
-const FOME_LIMITE_TRISTE             = 30;
-const PASSANDO_MAL_DURACAO_S         = 600;    // 10 min
-const DEBOCHANDO_DURACAO_S           = 45;
-const EMPOLGADO_DURACAO_S            = 60;
-const MORRE_APOS_FOME_ZERO_S         = 30 * 60; // 30 min
+// Todas as regras numéricas agora vêm da tabela config (com fallback defaults em src/config.php).
+// Painel admin em /admin pode editar ao vivo.
 
 /**
  * Calcula quantos "pontos de fome" o pato perdeu entre dois momentos,
@@ -32,12 +22,15 @@ function fome_decaimento_no_intervalo(DateTimeImmutable $de, DateTimeImmutable $
     $tz = new DateTimeZone('America/Sao_Paulo');
     $cursor = $de->setTimezone($tz);
     $fim    = $ate->setTimezone($tz);
+    $taxa_dia   = config_float('fome_decaimento_dia');
+    $taxa_noite = config_float('fome_decaimento_noite');
+    $sono_ini   = config_int('sono_hora_inicio');
+    $sono_fim   = config_int('sono_hora_fim');
     $total = 0.0;
-    // passo de 60s — sobra de 1 ponto no final é desprezível
     while ($cursor < $fim) {
         $h = (int) $cursor->format('G');
-        $dormindo = $h >= SONO_HORA_INICIO || $h < SONO_HORA_FIM;
-        $taxa_h = $dormindo ? FOME_DECAIMENTO_POR_HORA_NOITE : FOME_DECAIMENTO_POR_HORA_DIA;
+        $dormindo = $h >= $sono_ini || $h < $sono_fim;
+        $taxa_h = $dormindo ? $taxa_noite : $taxa_dia;
         $total += $taxa_h / 60.0;  // 1 minuto
         $cursor = $cursor->modify('+1 minute');
     }
@@ -69,9 +62,14 @@ function pato_lido_com_decaimento(): array {
             $estado_ate = null;
         }
 
-        // Fome baixa → triste_fome (não sobrepõe passando_mal)
-        if ($estado === 'parado' && $fome_nova < FOME_LIMITE_TRISTE) {
+        // Fome baixa → triste_fome (não sobrepõe passando_mal/empolgado/debochando)
+        $limite = config_int('fome_limite_triste');
+        if ($estado === 'parado' && $fome_nova < $limite) {
             $estado = 'triste_fome';
+        }
+        // Fome voltou acima do limite → sai de triste_fome
+        if ($estado === 'triste_fome' && $fome_nova >= $limite) {
+            $estado = 'parado';
         }
 
         // Morte: fome=0 há mais de 12h, EXCETO se tiver escudo de invulnerabilidade ativo
@@ -84,7 +82,7 @@ function pato_lido_com_decaimento(): array {
                 $p['morto_desde'] = $agora->format('c');
             }
             $morto_desde = new DateTimeImmutable($p['morto_desde']);
-            if ($agora->getTimestamp() - $morto_desde->getTimestamp() >= MORRE_APOS_FOME_ZERO_S) {
+            if ($agora->getTimestamp() - $morto_desde->getTimestamp() >= config_int('morre_apos_fome_zero_s')) {
                 $estado = 'morto';
             }
         } elseif ($fome_nova > 0 && $p['morto_desde']) {
@@ -151,16 +149,16 @@ function pato_alimenta(string $tipo, string $qualidade = 'boa', string $texto_id
 
     if ($tipo === 'comida_estragada') {
         $estado = 'passando_mal';
-        $boost  = FOME_BOOST_IDEIA_RUIM;
-        $dur    = PASSANDO_MAL_DURACAO_S;
+        $boost  = config_int('fome_boost_ruim');
+        $dur    = config_int('passando_mal_duracao_s');
     } elseif ($qualidade === 'meh') {
         $estado = 'debochando';
-        $boost  = FOME_BOOST_IDEIA_MEH;
-        $dur    = DEBOCHANDO_DURACAO_S;
+        $boost  = config_int('fome_boost_meh');
+        $dur    = config_int('debochando_duracao_s');
     } else {
         $estado = 'empolgado';
-        $boost  = FOME_BOOST_IDEIA_BOA;
-        $dur    = EMPOLGADO_DURACAO_S;
+        $boost  = config_int('fome_boost_boa');
+        $dur    = config_int('empolgado_duracao_s');
     }
 
     db()->prepare('
