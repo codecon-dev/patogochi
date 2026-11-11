@@ -307,6 +307,16 @@ static int indiceComida(const char* nome) {
   return -1;
 }
 
+// reação depois de comer sai da comida (o "estado" do /ideia.php é ignorado, igual ao estado base)
+static Anim reacaoDaComida(int c) {
+  switch (c) {
+    case FOOD_BISCOITO_SORTE:   return ANIM_OUVINDO;      // tarefa: "anotado", sem festa
+    case FOOD_MINHOCA:          return ANIM_DEBOCHANDO;
+    case FOOD_COMIDA_ESTRAGADA: return ANIM_PASSANDO_MAL;
+    default:                    return ANIM_EMPOLGADO;    // pipoca, moeda de chocolate
+  }
+}
+
 static Anim animPorNome(const char* nome, Anim padrao) {
   if (!nome) return padrao;
   for (int i = 0; i < ANIM_COUNT; i++) if (strcmp(ANIMS[i].name, nome) == 0) return (Anim)i;
@@ -482,6 +492,7 @@ static void trataResposta() {
     Serial.printf("LOG tipo de comida desconhecido na resposta: %s\n", resposta.corpo.c_str());
     resposta.comida = resposta.reacao == ANIM_PASSANDO_MAL ? FOOD_COMIDA_ESTRAGADA : FOOD_PIPOCA;
   }
+  resposta.reacao = reacaoDaComida(resposta.comida);
   if (resposta.comida >= 0) {
     comida = (Food)resposta.comida;
     comendoIdeia = true;
@@ -562,6 +573,7 @@ static bool ocioso() {
 
 // ---------- brilho da tela ----------
 static constexpr uint32_t TELA_DESCANSA_MS = 60000;  // 1 min sem mexer -> tela fraca
+static constexpr uint32_t TELA_DORME_MS = 5000;      // pato dormindo: 5 s sem mexer -> quase apagada
 static constexpr int BRILHO_NORMAL = 160, BRILHO_DESCANSO = 40, BRILHO_NOITE = 10;
 
 // ---------- noite ----------
@@ -1528,8 +1540,10 @@ void loop() {
         tela != TELA_PATO || ultimaInteracaoMs == 0) {
       ultimaInteracaoMs = agora;
     }
-    bool parado = agora - ultimaInteracaoMs > TELA_DESCANSA_MS;
-    int brilho = !parado ? BRILHO_NORMAL : (ehNoite() ? BRILHO_NOITE : BRILHO_DESCANSO);
+    uint32_t semMexer = agora - ultimaInteracaoMs;
+    int brilho = BRILHO_NORMAL;
+    if (estado == ANIM_DORMINDO && semMexer > TELA_DORME_MS) brilho = BRILHO_NOITE;  // dormiu: apaga logo
+    else if (semMexer > TELA_DESCANSA_MS) brilho = ehNoite() ? BRILHO_NOITE : BRILHO_DESCANSO;
     if (brilho != brilhoAtual) {
       M5.Display.setBrightness(brilho);
       brilhoAtual = brilho;

@@ -66,13 +66,13 @@ Barra de ícones embaixo, um por botão:
 | `fingindo` | 2 | Súplica recusada: abre o olho, desconfia, fecha e morre de novo | quack de morte | apagadas | dupla |
 | `coco` | 8 | 1 por lembrete vencido (até 4) | | | |
 
-## Comidas (`assets/sprites/comidas/`) — definido pela API
+## Comidas (`assets/sprites/comidas/`) — comida vem da API, reação sai da comida no firmware
 
 | Comida | Tipo de ideia | Reação |
 |---|---|---|
 | `pipoca` | Conteúdo / vídeo | `empolgado` |
 | `moeda_chocolate` | Negócio / dinheiro | `empolgado` |
-| `biscoito_sorte` | Ideia com prazo (vira lembrete) | `empolgado` |
+| `biscoito_sorte` | Ideia com prazo (vira lembrete) | `ouvindo` ("anotado") |
 | `minhoca` | Sem pé nem cabeça | `debochando` |
 | `comida_estragada` | Ideia ruim | `passando_mal` |
 
