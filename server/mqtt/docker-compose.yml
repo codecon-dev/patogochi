@@ -1,0 +1,23 @@
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: patogochi-mqtt
+    restart: unless-stopped
+    ports:
+      - "8883:8883"           # TLS publico
+    networks:
+      - cobranca-net
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./passwd:/mosquitto/config/passwd:ro
+      - ./certs:/mosquitto/certs:ro
+      - mqtt-data:/mosquitto/data
+
+networks:
+  cobranca-net:
+    name: codegus-cobranca_cobranca-net
+    external: true
+
+volumes:
+  mqtt-data:
+    name: patogochi_mqtt_data

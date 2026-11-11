@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Patogochi — Ideias comidas 🦆</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/png" href="/favicon.png">
+<link rel="apple-touch-icon" href="/favicon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #1a1626;
+    --bg2: #251d36;
+    --fg: #f0e9ff;
+    --muted: #9d8fbd;
+    --accent: #ffcc00;
+    --pipoca: #ffd27d;
+    --moeda_chocolate: #c89b5a;
+    --biscoito_sorte: #ffa8d9;
+    --minhoca: #a3d977;
+    --comida_estragada: #7bbf4a;
+    --up: #6bff8e;
+    --down: #ff6b8e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: 'VT323', monospace;
+    font-size: 20px;
+    line-height: 1.4;
+    min-height: 100vh;
+    image-rendering: pixelated;
+  }
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+      to bottom,
+      transparent 0 2px,
+      rgba(0,0,0,0.08) 2px 3px
+    );
+    pointer-events: none;
+    z-index: 999;
+  }
+
+  header {
+    text-align: center;
+    padding: 24px 16px 8px;
+    border-bottom: 2px dashed var(--muted);
+  }
+  header img.pato-header {
+    width: 96px;
+    height: 96px;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    margin-bottom: 8px;
+  }
+  header h1 {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 24px;
+    margin: 0 0 8px;
+    text-shadow: 3px 3px 0 var(--accent);
+    letter-spacing: 1px;
+  }
+  header p { margin: 0; color: var(--muted); font-size: 22px; }
+
+  .stats .sprite-stat {
+    width: 24px;
+    height: 24px;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    vertical-align: middle;
+    margin-right: 4px;
+  }
+
+  .stats {
+    display: flex;
+    gap: 16px;
+    justify-content: center;
+    padding: 16px;
+    font-family: 'Press Start 2P', monospace;
+    font-size: 10px;
+    flex-wrap: wrap;
+  }
+  .stat {
+    background: var(--bg2);
+    padding: 12px 16px;
+    border: 2px solid var(--muted);
+    min-width: 80px;
+    text-align: center;
+  }
+  .stat b { color: var(--accent); display: block; font-size: 14px; margin-bottom: 4px; }
+
+  main {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 16px;
+  }
+
+  .ideia {
+    display: grid;
+    grid-template-columns: 56px 1fr 72px;
+    gap: 12px;
+    padding: 12px;
+    background: var(--bg2);
+    border: 2px solid transparent;
+    border-radius: 2px;
+    margin-bottom: 12px;
+    transition: border-color 0.2s;
+  }
+  .ideia:hover { border-color: var(--accent); }
+
+  .ideia .icone {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg);
+    border-radius: 4px;
+    padding: 4px;
+  }
+  .ideia .icone img {
+    width: 48px;
+    height: 48px;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+  }
+  .ideia .corpo .texto {
+    font-size: 24px;
+    color: var(--fg);
+    margin-bottom: 2px;
+    word-break: break-word;
+    line-height: 1.2;
+  }
+  .ideia .corpo .meta {
+    font-size: 10px;
+    color: var(--muted);
+    font-family: 'Press Start 2P', monospace;
+    letter-spacing: 1px;
+    opacity: 0.7;
+  }
+  .ideia .corpo .tipo[data-tipo="pipoca"]           { color: var(--pipoca); }
+  .ideia .corpo .tipo[data-tipo="moeda_chocolate"]  { color: var(--moeda_chocolate); }
+  .ideia .corpo .tipo[data-tipo="biscoito_sorte"]   { color: var(--biscoito_sorte); }
+  .ideia .corpo .tipo[data-tipo="minhoca"]          { color: var(--minhoca); }
+  .ideia .corpo .tipo[data-tipo="comida_estragada"] { color: var(--comida_estragada); }
+
+  .voto {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    font-family: 'Press Start 2P', monospace;
+  }
+  .voto button {
+    background: var(--bg);
+    border: 2px solid var(--muted);
+    color: var(--fg);
+    font-family: inherit;
+    font-size: 12px;
+    width: 44px;
+    height: 32px;
+    cursor: pointer;
+    image-rendering: pixelated;
+    transition: all 0.1s;
+  }
+  .voto button:hover { background: var(--bg2); }
+  .voto button:active { transform: translateY(1px); }
+  .voto button.ativo.up   { background: var(--up); color: #000; border-color: var(--up); }
+  .voto button.ativo.down { background: var(--down); color: #000; border-color: var(--down); }
+  .voto .score {
+    font-size: 14px;
+    color: var(--accent);
+    min-width: 32px;
+    text-align: center;
+    transition: transform 0.2s, color 0.2s;
+  }
+  .voto .score.piscou {
+    transform: scale(1.4);
+    color: #fff;
+    text-shadow: 0 0 8px var(--accent);
+  }
+
+  .modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(26, 22, 38, 0.95);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 16px;
+  }
+  .modal-box {
+    background: var(--bg2);
+    border: 4px solid var(--accent);
+    padding: 32px 24px;
+    max-width: 400px;
+    width: 100%;
+    text-align: center;
+    box-shadow: 8px 8px 0 rgba(0,0,0,0.5);
+  }
+  .modal h2 {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 16px;
+    margin: 0 0 24px;
+    line-height: 1.6;
+  }
+  .modal input {
+    width: 100%;
+    padding: 12px;
+    background: var(--bg);
+    border: 2px solid var(--muted);
+    color: var(--fg);
+    font-family: 'VT323', monospace;
+    font-size: 24px;
+    text-align: center;
+    margin-bottom: 16px;
+    outline: none;
+  }
+  .modal input:focus { border-color: var(--accent); }
+  .modal button {
+    background: var(--accent);
+    color: #000;
+    border: none;
+    padding: 12px 24px;
+    font-family: 'Press Start 2P', monospace;
+    font-size: 12px;
+    cursor: pointer;
+    letter-spacing: 1px;
+  }
+  .modal button:hover { background: #ffdb3e; }
+  .modal .erro { color: var(--down); font-size: 16px; min-height: 20px; margin-top: 8px; }
+
+  .usuario-atual {
+    text-align: center;
+    padding: 8px;
+    font-family: 'Press Start 2P', monospace;
+    font-size: 10px;
+    color: var(--muted);
+  }
+  .usuario-atual b { color: var(--accent); }
+  .usuario-atual a { color: var(--muted); text-decoration: underline; cursor: pointer; margin-left: 8px; }
+
+  .vazio {
+    text-align: center;
+    padding: 48px;
+    color: var(--muted);
+    font-size: 24px;
+  }
+
+  footer {
+    text-align: center;
+    padding: 32px 16px;
+    color: var(--muted);
+    font-size: 14px;
+    font-family: 'Press Start 2P', monospace;
+  }
+  footer a { color: var(--accent); text-decoration: none; }
+</style>
+</head>
+<body>
+
+<header>
+  <img class="pato-header" id="pato-header" src="/sprites/pato/empolgado.png" alt="pato">
+  <h1>PATOGOCHI</h1>
+  <p>Ideias comidas pelo pato</p>
+</header>
+
+<div class="stats" id="stats"></div>
+
+<div class="usuario-atual" id="usuario-atual"></div>
+
+<main>
+  <div id="feed"></div>
+  <div class="vazio" id="vazio" style="display:none">quack... nenhuma ideia ainda</div>
+</main>
+
+<footer>
+  pato come em <a href="https://patogochi.codegus.com/docs">patogochi.codegus.com</a>
+</footer>
+
+<div class="modal" id="modal" style="display:none">
+  <div class="modal-box">
+    <h2>QUEM É VOCÊ?</h2>
+    <p style="color:var(--muted);margin-bottom:16px">escolhe um username pra votar nas ideias</p>
+    <input id="input-username" placeholder="seu nome" maxlength="30" autocomplete="off">
+    <div class="erro" id="erro-username"></div>
+    <button id="btn-entrar">ENTRAR</button>
+  </div>
+</div>
+
+<script>
+const SPRITES = {
+  pipoca:           '/sprites/comidas/pipoca.png',
+  moeda_chocolate:  '/sprites/comidas/moeda_chocolate.png',
+  minhoca:          '/sprites/comidas/minhoca.png',
+  comida_estragada: '/sprites/comidas/comida_estragada.png',
+};
+const NOMES = {
+  pipoca:           'IDEIA DE VÍDEO',
+  moeda_chocolate:  'IDEIA DE NEGÓCIO',
+  minhoca:          'SEM PÉ NEM CABEÇA',
+  comida_estragada: 'IDEIA ESTRAGADA',
+};
+const ORIGEM_ICONE = {
+  core2: '🎤',
+  alexa: '📣',
+  web:   '🌐',
+};
+
+let username = localStorage.getItem('patogochi_username') || '';
+
+function timeAgo(iso) {
+  const d = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (d < 60)   return `${Math.floor(d)}s atrás`;
+  if (d < 3600) return `${Math.floor(d/60)}min atrás`;
+  if (d < 86400)return `${Math.floor(d/3600)}h atrás`;
+  return `${Math.floor(d/86400)}d atrás`;
+}
+
+function pedirUsername() {
+  const modal = document.getElementById('modal');
+  const input = document.getElementById('input-username');
+  const erro  = document.getElementById('erro-username');
+  modal.style.display = 'flex';
+  input.focus();
+  erro.textContent = '';
+
+  const entrar = () => {
+    const v = input.value.trim();
+    if (v.length < 2 || v.length > 30) {
+      erro.textContent = '2 a 30 caracteres';
+      return;
+    }
+    if (!/^[\w\- áéíóúâêôãõç]+$/i.test(v)) {
+      erro.textContent = 'letras, números, espaços e hífen apenas';
+      return;
+    }
+    username = v;
+    localStorage.setItem('patogochi_username', username);
+    modal.style.display = 'none';
+    atualizarBannerUsuario();
+    carregar();
+  };
+  document.getElementById('btn-entrar').onclick = entrar;
+  input.onkeydown = (e) => { if (e.key === 'Enter') entrar(); };
+}
+
+function atualizarBannerUsuario() {
+  const el = document.getElementById('usuario-atual');
+  if (username) {
+    el.innerHTML = `você é <b>${escapar(username)}</b> <a id="trocar-user">trocar</a>`;
+    document.getElementById('trocar-user').onclick = () => {
+      localStorage.removeItem('patogochi_username');
+      username = '';
+      pedirUsername();
+    };
+  } else {
+    el.innerHTML = '';
+  }
+}
+
+function escapar(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+async function carregar() {
+  const q = username ? `?username=${encodeURIComponent(username)}` : '';
+  const r = await fetch(`/feed.php${q}`);
+  const data = await r.json();
+  renderFeed(data.ideias || []);
+  renderStats(data.ideias || []);
+}
+
+function renderStats(ideias) {
+  const porTipo = {};
+  for (const i of ideias) porTipo[i.tipo] = (porTipo[i.tipo] || 0) + 1;
+  const el = document.getElementById('stats');
+  el.innerHTML = `
+    <div class="stat"><b>${ideias.length}</b>IDEIAS</div>
+    <div class="stat" style="color:var(--pipoca)"><b>${porTipo.pipoca||0}</b><img class="sprite-stat" src="${SPRITES.pipoca}"> VÍDEO</div>
+    <div class="stat" style="color:var(--moeda_chocolate)"><b>${porTipo.moeda_chocolate||0}</b><img class="sprite-stat" src="${SPRITES.moeda_chocolate}"> NEG.</div>
+    <div class="stat" style="color:var(--minhoca)"><b>${porTipo.minhoca||0}</b><img class="sprite-stat" src="${SPRITES.minhoca}"> S/PÉ</div>
+    <div class="stat" style="color:var(--comida_estragada)"><b>${porTipo.comida_estragada||0}</b><img class="sprite-stat" src="${SPRITES.comida_estragada}"> RUIM</div>
+  `;
+}
+
+function renderFeed(ideias) {
+  const feed  = document.getElementById('feed');
+  const vazio = document.getElementById('vazio');
+  if (ideias.length === 0) {
+    feed.innerHTML = '';
+    vazio.style.display = 'block';
+    return;
+  }
+  vazio.style.display = 'none';
+  feed.innerHTML = ideias.map(i => `
+    <div class="ideia" data-id="${i.id}" data-score="${i.score}">
+      <div class="icone" title="${NOMES[i.tipo]||i.tipo}">
+        ${SPRITES[i.tipo]
+          ? `<img src="${SPRITES[i.tipo]}" alt="${NOMES[i.tipo]||''}">`
+          : '<span style="font-size:36px">❓</span>'}
+      </div>
+      <div class="corpo">
+        <div class="texto">${escapar(i.texto)}</div>
+        <div class="meta">
+          <span class="tipo" data-tipo="${i.tipo}">${NOMES[i.tipo]||i.tipo}</span>
+        </div>
+      </div>
+      <div class="voto">
+        <button class="up ${i.meu_voto===1?'ativo':''}" data-valor="1">▲</button>
+        <div class="score">${i.score>0?'+':''}${i.score}</div>
+        <button class="down ${i.meu_voto===-1?'ativo':''}" data-valor="-1">▼</button>
+      </div>
+    </div>
+  `).join('');
+
+  feed.querySelectorAll('.voto button').forEach(btn => {
+    btn.onclick = async () => {
+      if (!username) { pedirUsername(); return; }
+      const card = btn.closest('.ideia');
+      const ideia_id = parseInt(card.dataset.id);
+      const valor_clicado = parseInt(btn.dataset.valor);
+      const ja_ativo = btn.classList.contains('ativo');
+      const voto_final = ja_ativo ? 0 : valor_clicado;
+
+      // Trava polling pra este card durante o voto (evita flicker)
+      const idStr = String(ideia_id);
+      votosEmAndamento.add(idStr);
+
+      // Optimistic UI: score e botao atualizam antes do server responder
+      const scoreEl = card.querySelector('.score');
+      const scoreAtual = parseInt(scoreEl.textContent) || 0;
+      const delta = voto_final - (ja_ativo ? valor_clicado : 0);
+      const scoreOtimista = scoreAtual + delta;
+      scoreEl.textContent = (scoreOtimista>0?'+':'') + scoreOtimista;
+      scoreEl.classList.add('piscou');
+      setTimeout(() => scoreEl.classList.remove('piscou'), 500);
+
+      card.querySelectorAll('.voto button').forEach(b => b.classList.remove('ativo'));
+      if (voto_final !== 0) btn.classList.add('ativo');
+
+      try {
+        const r = await fetch('/voto.php', {
+          method: 'POST',
+          headers: {'content-type': 'application/json'},
+          body: JSON.stringify({ ideia_id, voto: voto_final, username }),
+        });
+        const data = await r.json();
+        if (data.ok) {
+          // Corrige pro valor real do server
+          scoreEl.textContent = (data.score>0?'+':'') + data.score;
+        }
+      } catch (e) { /* silencia */ }
+      finally {
+        // Libera polling depois de 3s (tempo pro proximo scores.php ja ver o voto)
+        setTimeout(() => votosEmAndamento.delete(idStr), 3000);
+      }
+    };
+  });
+}
+
+// Guarda IDs com voto local em andamento (nao sobrescrever durante polling)
+const votosEmAndamento = new Set();
+
+// Atualiza SO os scores das ideias ja renderizadas (rapido, sem re-render).
+// Se detectar mudança que rompe a ordem, reordena os cards in-place.
+async function atualizarScores() {
+  const cards = document.querySelectorAll('.ideia[data-id]');
+  if (cards.length === 0) return;
+  const ids = [...cards].map(c => c.dataset.id).join(',');
+  const q = username ? `&username=${encodeURIComponent(username)}` : '';
+  let scoreMudou = false;
+  try {
+    const r = await fetch(`/scores.php?ids=${ids}${q}`);
+    const data = await r.json();
+    for (const [id, info] of Object.entries(data.scores || {})) {
+      if (votosEmAndamento.has(id)) continue;
+      const card = document.querySelector(`.ideia[data-id="${id}"]`);
+      if (!card) continue;
+      const scoreEl = card.querySelector('.score');
+      const upBtn   = card.querySelector('.voto button.up');
+      const downBtn = card.querySelector('.voto button.down');
+      const scoreAtual = parseInt(scoreEl.textContent) || 0;
+      if (scoreAtual !== info.score) {
+        scoreEl.textContent = (info.score>0?'+':'') + info.score;
+        scoreEl.classList.add('piscou');
+        setTimeout(() => scoreEl.classList.remove('piscou'), 500);
+        card.dataset.score = info.score;
+        scoreMudou = true;
+      }
+      upBtn.classList.toggle('ativo',   info.meu_voto === 1);
+      downBtn.classList.toggle('ativo', info.meu_voto === -1);
+    }
+
+    // Reordena DOM se algum score mudou (score desc, id desc)
+    if (scoreMudou) {
+      const feed = document.getElementById('feed');
+      const ordenados = [...feed.children].sort((a, b) => {
+        const sa = parseInt(a.dataset.score) || 0;
+        const sb = parseInt(b.dataset.score) || 0;
+        if (sb !== sa) return sb - sa;
+        return parseInt(b.dataset.id) - parseInt(a.dataset.id);
+      });
+      ordenados.forEach(el => feed.appendChild(el));
+    }
+  } catch (e) { /* silencia */ }
+}
+
+// boot
+atualizarBannerUsuario();
+carregar();
+setInterval(atualizarScores, 2000);   // scores a cada 2s (leve)
+setInterval(carregar,        20000);  // feed completo a cada 20s (pra pegar ideias novas)
+</script>
+
+</body>
+</html>

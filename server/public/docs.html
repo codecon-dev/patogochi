@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <title>Patogochi API 🦆</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="apple-touch-icon" href="/favicon.png">
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
+  <style>
+    body { margin: 0; background: #fafafa; }
+    .topbar { display: none; }
+    .swagger-ui .info .title small.version-stamp { background: #e67e22; }
+  </style>
+</head>
+<body>
+  <div id="swagger"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+  <script>
+    window.ui = SwaggerUIBundle({
+      url: '/openapi.yaml',
+      dom_id: '#swagger',
+      deepLinking: true,
+      tryItOutEnabled: true,
+      displayRequestDuration: true,
+      filter: true,
+      syntaxHighlight: { theme: 'nord' },
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,385 @@
+openapi: 3.0.3
+info:
+  title: Patogochi API
+  description: |
+    Servidor do tamagotchi de pato. O cérebro mora aqui — o Core2 (M5Stack)
+    só desenha o sprite e envia ideias.
+
+    **Regras principais** ([PLANO.md](https://github.com/codecon-dev/patogochi/blob/main/PLANO.md)):
+    - Fome 0-100, **decai ~33/h de dia (07-20h), ~8/h de noite (21-06h)** → cheio a vazio em ~3h de dia.
+    - Ideia boa `+30` → `empolgado`. Ideia meh `+15` → `debochando`. Ideia ruim `+5` → `passando_mal` por 10 min.
+    - **Lembrete NÃO alimenta** — só cria tarefa. Pato continua como estava.
+    - Fome=0 por **30 min** → `morto`.
+    - Lembrete vencido → cocô na tela. Só sai ao marcar como feito.
+  version: "0.1.0"
+servers:
+  - url: https://patogochi.codegus.com
+    description: Produção (cobranca-vm, sa-east-1)
+  - url: http://localhost:8080
+    description: Dev local (docker compose)
+
+tags:
+  - name: estado
+    description: Estado atual do pato (polling pelo Core2)
+  - name: ideia
+    description: Alimentar o pato com ideias
+  - name: lembretes
+    description: Cocôs (lembretes vencidos)
+  - name: vida
+    description: Morte e ressurreição
+  - name: cron
+    description: Jobs internos
+
+security:
+  - ApiToken: []
+
+paths:
+  /estado.php:
+    get:
+      tags: [estado]
+      summary: Retorna o estado atual do pato
+      security: []
+      description: |
+        Aplica o decaimento de fome baseado em tempo (desde o último update)
+        antes de responder. Core2 chama a cada ~2 min. **Público (sem token).**
+      responses:
+        '200':
+          description: Estado do pato
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Estado'
+              examples:
+                feliz:
+                  value:
+                    sprite: parado
+                    estado: parado
+                    hp: 87
+                    coco: 0
+                    mortes: 0
+                    ultima_opiniao: "essa ideia tem futuro"
+                    versao: 42
+                morrendo:
+                  value:
+                    sprite: triste_fome
+                    estado: triste_fome
+                    hp: 18
+                    coco: 3
+                    mortes: 1
+                    ultima_opiniao: "já ouvi melhor"
+                    versao: 103
+
+  /ideia.php:
+    post:
+      tags: [ideia]
+      summary: Enviar uma ideia (áudio ou texto) pro pato
+      description: |
+        Aceita áudio (multipart) OU texto (JSON). Se for áudio, whisper.cpp
+        transcreve em pt-BR antes de mandar pro Claude. Claude classifica em 1 dos 5 tipos.
+
+        **Tipos de comida (sprite 16x16 no Core2):**
+
+        | Tipo | O que é | Efeito no pato |
+        |---|---|---|
+        | `pipoca` 🍿 | Ideia de vídeo/conteúdo | +30 HP → `empolgado` (ou +15 → `debochando` se meh) |
+        | `moeda_chocolate` 🍫 | Ideia de negócio/dinheiro | +30 HP → `empolgado` (ou +15 → `debochando` se meh) |
+        | `minhoca` 🐛 | Ideia bizarra, sem pé nem cabeça | +15 HP → `debochando` |
+        | `comida_estragada` 🥬 | Ideia ruim/clichê (uber de X, etc) | +5 HP → `passando_mal` 10 min |
+        | `biscoito_sorte` 🥠 | **Lembrete/tarefa** ("me lembra", "anota", "tenho que") | **Nada** — só cria lembrete. Vence → cocô na tela |
+
+        Palavras-chave que forçam lembrete: `me lembra`, `anota`, `anotar`,
+        `tenho que`, `preciso`, `nao esquecer`, `tarefa`, `pra fazer`.
+
+        Se o texto não tiver prazo explícito, o lembrete usa fim do dia atual.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IdeiaInput'
+            examples:
+              ideia_video:
+                summary: Ideia de vídeo → alimenta pato (+30 ou +15)
+                value:
+                  texto: "gravar um vídeo testando teclado com switches de banana"
+                  origem: core2
+              lembrete_com_prazo:
+                summary: Lembrete explícito → NÃO alimenta, só cria tarefa
+                value:
+                  texto: "me lembra de pagar a energia até sexta"
+                  origem: alexa
+              lembrete_sem_prazo:
+                summary: Lembrete sem data → prazo = fim do dia
+                value:
+                  texto: "anota aí tenho que ligar pro cliente"
+                  origem: web
+              ideia_ruim:
+                summary: Cliché → pato passa mal
+                value:
+                  texto: "uber mas pra sogra"
+                  origem: web
+          multipart/form-data:
+            schema:
+              type: object
+              required: [audio]
+              properties:
+                audio:
+                  type: string
+                  format: binary
+                  description: WAV/OPUS/MP3/M4A. Qualquer taxa, ffmpeg normaliza pra 16kHz mono.
+                origem:
+                  type: string
+                  enum: [core2, alexa, web]
+                  default: core2
+                texto:
+                  type: string
+                  description: Fallback — usado se `audio` vier vazio.
+      responses:
+        '200':
+          description: Ideia aceita, pato reagiu
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IdeiaResposta'
+        '400':
+          description: Texto vazio ou origem inválida
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Erro' }
+        '409':
+          description: Pato tá morto — precisa reviver antes
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Erro' }
+
+  /lembretes.php:
+    get:
+      tags: [lembretes]
+      summary: Lista lembretes pendentes
+      description: |
+        Retorna só os pendentes (`feito_em IS NULL`). Vencidos primeiro,
+        depois os futuros em ordem crescente.
+      responses:
+        '200':
+          description: Lista
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  lembretes:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:       { type: integer, example: 12 }
+                        texto:    { type: string, example: "pagar a energia" }
+                        vence_em: { type: string, format: date-time }
+                        vencido:  { type: boolean, description: "true = já virou cocô" }
+
+  /marcar-feito.php:
+    post:
+      tags: [lembretes]
+      summary: Marcar lembrete como feito (limpa cocô)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [lembrete_id]
+              properties:
+                lembrete_id: { type: integer, example: 12 }
+      responses:
+        '200':
+          description: |
+            Retorna o **estado completo** (mesmo JSON do `/estado.php`) + flag `ok`
+            + `lembrete_marcado`, pra economizar uma chamada a mais do Core2.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Estado'
+                  - type: object
+                    properties:
+                      ok: { type: boolean }
+                      lembrete_marcado: { type: integer }
+        '404':
+          description: Lembrete não existe ou já tava feito
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Erro' }
+
+  /reviver.php:
+    post:
+      tags: [vida]
+      summary: Reviver o pato (desculpa ou massagem cardíaca)
+      description: |
+        Dois métodos:
+        - **`desculpa`** — Claude julga se o pedido é sincero. Aceita **áudio (multipart)** ou texto JSON. Se não for sincero, pato debocha.
+        - **`massagem`** — 30 chacoalhadas a 100-120 BPM (lido pelo IMU do Core2).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  required: [metodo, texto]
+                  properties:
+                    metodo: { type: string, enum: [desculpa], example: desculpa }
+                    texto:  { type: string, example: "me desculpa pato, prometo ter mais ideias" }
+                - type: object
+                  required: [metodo, batidas, bpm]
+                  properties:
+                    metodo:  { type: string, enum: [massagem], example: massagem }
+                    batidas: { type: integer, minimum: 30, example: 30 }
+                    bpm:     { type: number, minimum: 100, maximum: 120, example: 110 }
+          multipart/form-data:
+            schema:
+              type: object
+              required: [metodo, audio]
+              properties:
+                metodo: { type: string, enum: [desculpa], default: desculpa }
+                audio:  { type: string, format: binary, description: "WAV 16kHz mono (ou qualquer formato, ffmpeg converte). Whisper transcreve." }
+      responses:
+        '200':
+          description: Pato reviveu (ou debochou da tua desculpa)
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    properties:
+                      ok: { type: boolean, example: true }
+                      hp: { type: integer, example: 50 }
+                      estado: { type: string, example: parado }
+                      mortes: { type: integer }
+                  - type: object
+                    properties:
+                      ok: { type: boolean, example: false }
+                      opiniao: { type: string, example: "o pato não acreditou. tenta de novo." }
+        '400':
+          description: Parâmetros inválidos
+        '409':
+          description: Pato tá vivo, não precisa reviver
+
+  /cron.php:
+    post:
+      tags: [cron]
+      summary: Vence lembretes, mata se fome=0 há 12h, gera obituário
+      description: |
+        Chamado pelo cron do host a cada 5 min. **Autenticado por header**
+        `X-Cron-Token` (secret no `.env` da VM).
+      parameters:
+        - in: header
+          name: X-Cron-Token
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  acoes:
+                    type: object
+                    properties:
+                      lembretes_viraram_coco: { type: integer }
+                      pato: { type: object }
+                      morreu: { type: string, nullable: true, description: obituário Claude }
+        '401':
+          description: Token inválido
+
+components:
+  securitySchemes:
+    ApiToken:
+      type: apiKey
+      in: header
+      name: X-Api-Token
+      description: |
+        Token definido no `.env` do servidor. Core2, Alexa e qualquer cliente
+        precisam mandar. `/estado.php` é o único que fica aberto.
+  schemas:
+    Estado:
+      type: object
+      properties:
+        sprite:
+          type: string
+          description: Nome da pasta de sprites a desenhar
+          enum: [parado, ouvindo, pensando, comendo, empolgado, debochando, passando_mal, triste_fome, dormindo, morto]
+        estado:
+          type: string
+          description: Mesmo valor de sprite — redundância pro cliente
+        hp:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Fome (100 = cheio, 0 = morrendo)
+        coco:
+          type: integer
+          description: Quantos cocôs tão na tela (lembretes vencidos pendentes)
+        mortes:
+          type: integer
+          description: Lápide — nunca decrementa
+        ultima_opiniao:
+          type: string
+          nullable: true
+          description: Última frase do pato sobre a ideia mais recente
+        versao:
+          type: integer
+          description: Incrementa a cada mudança — Core2 usa pra detectar diff
+    IdeiaInput:
+      type: object
+      required: [texto]
+      properties:
+        texto:
+          type: string
+          minLength: 1
+          example: "fazer um app de notas que xinga o usuário"
+        origem:
+          type: string
+          enum: [core2, alexa, web]
+          default: core2
+    IdeiaResposta:
+      type: object
+      description: |
+        Retorno enxuto — o Core2 já tem os sprites de comida e reação do pato.
+        Nada de texto de opinião: o visual fala tudo.
+
+        **Importante:** quando `tipo` é `biscoito_sorte`, o `estado` mantém o valor
+        atual do pato (não vira `empolgado`). Lembrete é anotação, não comida.
+      required: [tipo, estado]
+      properties:
+        tipo:
+          type: string
+          description: |
+            Qual comida 16x16 desenhar na tela (ou ícone, no caso de lembrete).
+            - `pipoca` → ideia de vídeo/conteúdo
+            - `moeda_chocolate` → ideia de negócio/dinheiro
+            - `biscoito_sorte` → lembrete/tarefa (não alimenta)
+            - `minhoca` → ideia sem pé nem cabeça (bizarra, non-sense)
+            - `comida_estragada` → ideia ruim (pato passa mal)
+          enum: [pipoca, moeda_chocolate, minhoca, biscoito_sorte, comida_estragada]
+        prazo:
+          type: string
+          format: date-time
+          nullable: true
+          description: ISO8601 do lembrete (só quando `tipo=biscoito_sorte`). Senão null.
+          example: "2026-11-15T18:00:00-03:00"
+        estado:
+          type: string
+          description: |
+            Estado do pato logo depois do request:
+            - `empolgado` → ideia boa (asas abertas, olhos brilhando)
+            - `debochando` → ideia meh ou minhoca (olha de lado, bico torto)
+            - `passando_mal` → `comida_estragada` (verde, espiral no olho, 10 min)
+            - **Qualquer outro** (parado, triste_fome, etc) → `tipo=biscoito_sorte` (lembrete não mexe no pato)
+          enum: [empolgado, debochando, passando_mal, parado, ouvindo, pensando, comendo, triste_fome, dormindo, morto]
+    Erro:
+      type: object
+      properties:
+        error: { type: string }
