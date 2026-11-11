@@ -66,12 +66,12 @@ Barra de ícones embaixo, um por botão:
 | `fingindo` | 2 | Súplica recusada: abre o olho, desconfia, fecha e morre de novo | quack de morte | apagadas | dupla |
 | `coco` | 8 | 1 por lembrete vencido (até 4) | | | |
 
-## Comidas (`assets/sprites/comidas/`) — comida vem da API, reação sai da comida no firmware
+## Comidas (`assets/sprites/comidas/`) — definido pela API (reação = `estado` do /ideia.php; se não for empolgado/debochando/passando_mal, sai da comida)
 
 | Comida | Tipo de ideia | Reação |
 |---|---|---|
-| `pipoca` | Conteúdo / vídeo | `empolgado` |
-| `moeda_chocolate` | Negócio / dinheiro | `empolgado` |
+| `pipoca` | Conteúdo / vídeo | `empolgado` (meh: `debochando`) |
+| `moeda_chocolate` | Negócio / dinheiro | `empolgado` (meh: `debochando`) |
 | `biscoito_sorte` | Ideia com prazo (vira lembrete) | `parado` (neutro) |
 | `minhoca` | Sem pé nem cabeça | `debochando` |
 | `comida_estragada` | Ideia ruim | `passando_mal` |
@@ -80,9 +80,10 @@ Barra de ícones embaixo, um por botão:
 
 ## Regras do jogo (no servidor)
 
-- Fome (hp) de 100 a 0, cai ~4 por hora. Ideia boa **+30**, ruim **+5** e `passando_mal` 10 min.
-- Fome em 0 por **12 h** → `morto`.
-- Ideia com prazo ("me lembra de X até sexta") vira **lembrete**; vencido → **cocô** na tela até marcar como feito.
+- Fome (hp) de 100 a 0: cai ~33 por hora de dia e **1 por hora à noite** (21h–7h).
+- Ideia boa **+30** (`empolgado`), meh **+15** (`debochando`), ruim **+5** e `passando_mal` 10 min.
+- Fome em 0 por **30 min** → `morto`.
+- Ideia com prazo ("me lembra de X até sexta") vira **lembrete** e **não alimenta**; vencido → **cocô** na tela até marcar como feito.
 
 ## Morte e ressurreição
 

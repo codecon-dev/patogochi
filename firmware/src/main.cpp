@@ -42,7 +42,8 @@ static const int BOTAO_X[3] = {53, 160, 267};                // centro dos botõ
 static constexpr uint16_t COR_FUNDO = 0x9E89;  // verde
 static constexpr uint16_t COR_NOITE = 0x396D;  // roxo (#3D2C6B) quando o pato dorme
 static uint16_t corIcone = TFT_BLACK;          // vira branco no fundo roxo
-static constexpr uint16_t COR_TEXTO = 0x2104;
+static constexpr uint16_t COR_TEXTO_DIA = 0x2104;
+static uint16_t corTexto = COR_TEXTO_DIA;      // vira branco no fundo roxo
 static constexpr uint16_t COR_REC = TFT_RED;
 static constexpr uint16_t COR_CARREGANDO = 0x2B43;  // verde-escuro (#2E6B1F), destaca do fundo
 
@@ -307,7 +308,9 @@ static int indiceComida(const char* nome) {
   return -1;
 }
 
-// reação depois de comer sai da comida (o "estado" do /ideia.php é ignorado, igual ao estado base)
+// reação depois de comer: vale o "estado" do /ideia.php quando é uma reação de comida
+// (empolgado, debochando = ideia meh, passando_mal); qualquer outro (lembrete devolve o
+// estado atual do pato) cai na reação da comida
 static Anim reacaoDaComida(int c) {
   switch (c) {
     case FOOD_BISCOITO_SORTE:   return ANIM_PARADO;       // tarefa: neutro, sem festa
@@ -402,7 +405,7 @@ static void tarefaEnvio(void*) {
       if (codigo == 200 && jsonOk && modo == ENVIO_IDEIA) {
         r.ok = true;
         r.comida = indiceComida(doc["tipo"]);
-        r.reacao = animPorNome(doc["estado"], ANIM_EMPOLGADO);
+        r.reacao = animPorNome(doc["estado"], ANIM_PARADO);  // sem estado: decide pela comida
       } else if (codigo == 200 && jsonOk) {
         r.ok = true;
         r.reviveu = doc["ok"] | false;
@@ -492,7 +495,10 @@ static void trataResposta() {
     Serial.printf("LOG tipo de comida desconhecido na resposta: %s\n", resposta.corpo.c_str());
     resposta.comida = resposta.reacao == ANIM_PASSANDO_MAL ? FOOD_COMIDA_ESTRAGADA : FOOD_PIPOCA;
   }
-  resposta.reacao = reacaoDaComida(resposta.comida);
+  if (resposta.reacao != ANIM_EMPOLGADO && resposta.reacao != ANIM_DEBOCHANDO &&
+      resposta.reacao != ANIM_PASSANDO_MAL) {
+    resposta.reacao = reacaoDaComida(resposta.comida);
+  }
   if (resposta.comida >= 0) {
     comida = (Food)resposta.comida;
     comendoIdeia = true;
@@ -930,7 +936,7 @@ static int tarefaEm(int yTela) {
 static void desenhaTarefas() {
   canvas.setFont(&fonts::efontJA_16);
   canvas.setTextSize(1);
-  canvas.setTextColor(COR_TEXTO);
+  canvas.setTextColor(corTexto);
   int deslocamento = puxado / 2;  // a lista desce metade do que o dedo puxou
   if (puxado > 0) {
     canvas.setTextDatum(middle_center);
@@ -957,13 +963,13 @@ static void desenhaTarefas() {
       canvas.fillRoundRect(4, y, SCREEN_W - 8, h, 6, l.feito ? 0xC618 : TFT_WHITE);
       // checkbox
       int bx = 12, by = y + 11;
-      canvas.drawRect(bx, by, 20, 20, COR_TEXTO);
-      canvas.drawRect(bx + 1, by + 1, 18, 18, COR_TEXTO);
+      canvas.drawRect(bx, by, 20, 20, corTexto);
+      canvas.drawRect(bx + 1, by + 1, 18, 18, corTexto);
       if (l.feito) desenhaCheck(bx + 10, by + 9, 0x05E0);
       else if (marcandoId == l.id && (millis() / 250) % 2) canvas.fillRect(bx + 5, by + 5, 10, 10, 0xAD55);
       // texto inteiro
       canvas.setTextDatum(middle_left);
-      canvas.setTextColor(l.feito ? 0x7BEF : COR_TEXTO);
+      canvas.setTextColor(l.feito ? 0x7BEF : corTexto);
       for (int k = 0; k < l.nLinhas; k++) {
         int ly = y + 21 + k * TAREFA_LINHA;
         canvas.drawString(l.linhas[k], TAREFA_TEXTO_X, ly);
@@ -972,7 +978,7 @@ static void desenhaTarefas() {
       // data fixa à direita, na altura da primeira linha
       if (l.prazo.length()) {
         canvas.setTextDatum(middle_right);
-        canvas.setTextColor(l.vencido && !l.feito ? 0xC800 : COR_TEXTO);  // vencido = vermelho
+        canvas.setTextColor(l.vencido && !l.feito ? 0xC800 : corTexto);  // vencido = vermelho
         canvas.drawString(l.prazo, SCREEN_W - 12, y + 21);
       }
     }
@@ -1040,7 +1046,7 @@ static void desenhaExtrasPato() {
       bool pulso = millis() - ultimaBatidaMs < 150;
       desenhaIcone(ICONE_CORACAO, SCREEN_W / 2, 20, pulso ? 3 : 2);
       int largura = SCREEN_W - 80, x0 = 40, y0 = 42;
-      canvas.drawRect(x0, y0, largura, 10, TFT_BLACK);
+      canvas.drawRect(x0, y0, largura, 10, corIcone);
       canvas.fillRect(x0 + 2, y0 + 2, (largura - 4) * batidas / MASSAGEM_BATIDAS, 6, COR_REC);
     } else {
       // dica do que o pato exige: ícone pulando + texto
@@ -1049,7 +1055,7 @@ static void desenhaExtrasPato() {
       desenhaIcone(desculpa ? ICONE_MICROFONE : ICONE_CORACAO, SCREEN_W / 2, 20 + pulo, 2);
       canvas.setFont(&fonts::efontJA_16);
       canvas.setTextSize(1);
-      canvas.setTextColor(COR_TEXTO);
+      canvas.setTextColor(corTexto);
       canvas.setTextDatum(middle_center);
       canvas.drawString(desculpa ? "segure o microfone e implore!" : "faça massagem cardíaca!", SCREEN_W / 2, 52);
       canvas.setFont(&fonts::Font0);
@@ -1084,6 +1090,11 @@ static void desenhaBateria() {
   }
 }
 
+// fundo roxo a noite inteira na tela do pato (comendo, reagindo, gravando...), não só dormindo
+static bool noiteNaTela() {
+  return tela == TELA_PATO && (estado == ANIM_DORMINDO || ehNoite());
+}
+
 // céu de noite: estrelinhas piscando em volta do pato (x, y, tamanho, fase)
 static void desenhaNoite() {
   static const int16_t ESTRELAS[][4] = {
@@ -1107,9 +1118,10 @@ static void desenhaNoite() {
 }
 
 static void desenhaCena() {
-  bool noite = tela == TELA_PATO && estado == ANIM_DORMINDO && !revelandoComida;
+  bool noite = noiteNaTela();
   canvas.fillScreen(noite ? COR_NOITE : COR_FUNDO);
   corIcone = noite ? TFT_WHITE : TFT_BLACK;
+  corTexto = noite ? TFT_WHITE : COR_TEXTO_DIA;
   if (noite) desenhaNoite();
 
   if (revelandoComida) {
@@ -1139,7 +1151,7 @@ static void desenhaCena() {
       canvas.setFont(&fonts::Font4);
       canvas.setTextSize(1);
       canvas.setTextDatum(middle_center);
-      canvas.setTextColor((millis() / 500) % 2 ? COR_TEXTO : COR_REC);
+      canvas.setTextColor((millis() / 500) % 2 ? corTexto : COR_REC);
       canvas.drawString(hora, SCREEN_W / 2, BARRA_Y + 18);
       canvas.setFont(&fonts::Font0);
     }
@@ -1168,7 +1180,7 @@ static void desenhaCena() {
       canvas.fillCircle(bx, cy, 8, COR_REC);
     }
     canvas.setFont(&fonts::Font0);
-    canvas.setTextColor(COR_TEXTO);
+    canvas.setTextColor(corTexto);
     canvas.setTextDatum(middle_center);
     canvas.setTextSize(2);
     canvas.drawString(String(gravadas / (float)TAXA_MIC, 1) + "s", BOTAO_X[1], cy);
@@ -1185,10 +1197,10 @@ static void enviaEspelho() {
   // espelho: tools/espelho/ lê essas linhas pelo USB e redesenha no navegador
   Serial.printf("PATO %s %u %d %u %s %d\n", ANIMS[estado].name, frame, cocos, frameCoco,
                 FOODS[comida].name, revelandoComida ? 1 : 0);
-  // UI tela gravando decimos arraste mortes hp batidas bateria(0/1 fraca/2 carregando) rolagem carga base exige
-  Serial.printf("UI %d %d %d %d %d %d %d %d %d %d %s %d\n", (int)tela, gravando ? 1 : 0,
+  // UI tela gravando decimos arraste mortes hp batidas bateria(0/1 fraca/2 carregando) rolagem carga base exige noite
+  Serial.printf("UI %d %d %d %d %d %d %d %d %d %d %s %d %d\n", (int)tela, gravando ? 1 : 0,
                 (int)(gravadas * 10 / TAXA_MIC), arrasteX, mortes, hp, batidas, estadoBateria(),
-                rolagem, (int)cargaLembretes, ANIMS[estadoBase].name, (int)exigencia);
+                rolagem, (int)cargaLembretes, ANIMS[estadoBase].name, (int)exigencia, noiteNaTela() ? 1 : 0);
   // lista de tarefas: no máximo 1x por segundo, só com a tela aberta
   static uint32_t ultimaListaMs = 0;
   if (tela == TELA_TAREFAS && millis() - ultimaListaMs > 1000) {

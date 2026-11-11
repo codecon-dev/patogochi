@@ -106,7 +106,8 @@ let ultimaBatida = 0, batidasAntes = 0;
 let fundo = 0;
 
 const TELA_PATO = 0, TELA_TAREFAS = 1, TELA_STATUS = 2;
-const COR_TEXTO = '#202020', COR_REC = '#ff0000';
+const COR_TEXTO_DIA = '#202020', COR_REC = '#ff0000';
+let COR_TEXTO = COR_TEXTO_DIA;  // vira branco no fundo roxo
 const MASSAGEM_BATIDAS = 30;
 const fonte = (px) => `${px}px system-ui, sans-serif`;
 
@@ -169,7 +170,7 @@ function desenhaExtrasPato() {
     if (ui.batidas > 0) {
       const pulso = performance.now() - ultimaBatida < 150;
       desenhaIcone(icones.CORACAO, W / 2, 20, pulso ? 3 : 2);
-      ctx.strokeStyle = '#000'; ctx.lineWidth = 1; ctx.strokeRect(40.5, 42.5, W - 81, 9);
+      ctx.strokeStyle = corIcone; ctx.lineWidth = 1; ctx.strokeRect(40.5, 42.5, W - 81, 9);
       ctx.fillStyle = COR_REC; ctx.fillRect(42, 44, (W - 84) * ui.batidas / MASSAGEM_BATIDAS, 6);
     } else {
       const pulo = Math.trunc(4 * Math.sin(performance.now() / 160));
@@ -247,7 +248,8 @@ function desenhaStatus() {
 
 function desenha() {
   ctx.clearRect(0, 0, W, H);
-  const noite = ui.tela === TELA_PATO && estado.anim === 'dormindo' && !estado.revelando;
+  const noite = ui.tela === TELA_PATO && (estado.anim === 'dormindo' || ui.noite);
+  COR_TEXTO = noite && FUNDOS[fundo] === 'cena' ? '#fff' : COR_TEXTO_DIA;
   if (FUNDOS[fundo] === 'cena') {
     ctx.fillStyle = noite ? '#3D2C6B' : COR_FUNDO; ctx.fillRect(0, 0, W, H);
     if (noite) desenhaNoite();
@@ -281,7 +283,7 @@ function desenha() {
 
 // linhas do firmware (enviaEspelho em main.cpp):
 //   PATO <anim> <frame> <cocos> <frameCoco> <comida> <revelando>
-//   UI <tela> <gravando> <decimos> <arraste> <mortes> <hp> <batidas> <bateria 0/1 fraca/2 carregando> <cursor> <carga> <base> <exigeDesculpa>
+//   UI <tela> <gravando> <decimos> <arraste> <mortes> <hp> <batidas> <bateria 0/1 fraca/2 carregando> <cursor> <carga> <base> <exigeDesculpa> <noite>
 //   LISTA <n>  seguido de n linhas  L <id> <feito> <vencido> <marcando> <prazo|-> <texto...>
 function processaLinha(linha) {
   linha = linha.replace(/\r$/, '');
@@ -296,7 +298,7 @@ function processaLinha(linha) {
     batidasAntes = batidas;
     ui = { tela: +p[1], gravando: p[2] === '1', decimos: +p[3], arraste: +p[4], mortes: +p[5], hp: +p[6],
            batidas, bateria: +p[8], cursor: +p[9], carga: +p[10], base: p[11],
-           desculpa: p[12] === '1' };
+           desculpa: p[12] === '1', noite: p[13] === '1' };
     desenha();
   } else if (p[0] === 'LISTA') {
     listaFaltam = +p[1]; listaNova = [];
