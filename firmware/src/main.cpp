@@ -593,7 +593,11 @@ static constexpr int FDS_ACORDA_HORA = 8;   // fim de semana: 8h
 // Segunda a sexta às DESPERTA_HORA:DESPERTA_MIN o pato acorda fazendo barulho.
 // Desliga tocando na tela ou em qualquer botão (ou sozinho depois de DESPERTA_MAX_MS).
 // Depois de desligado, o pato fica acordado mesmo antes do fim da noite.
+#ifdef TESTE_DESP_HORA  // simulação: pio run com -DTESTE_DESP_HORA=h -DTESTE_DESP_MIN=m (noite até lá)
+static constexpr int DESPERTA_HORA = TESTE_DESP_HORA, DESPERTA_MIN = TESTE_DESP_MIN;
+#else
 static constexpr int DESPERTA_HORA = 6, DESPERTA_MIN = 15;
+#endif
 static constexpr uint32_t DESPERTA_MAX_MS = 10 * 60 * 1000;
 // começa calmo e termina desesperado: em DESPERTA_RAMPA_MS o volume vai de baixo ao máximo
 // e o intervalo entre quacks cai de 2 s pra 0,35 s
@@ -607,7 +611,11 @@ static uint32_t inicioDespertarMs = 0, ultimoQuackDespertarMs = 0;
 RTC_DATA_ATTR static int diaDespertou = -1;  // tm_yday do último despertar (não tocar 2x no mesmo dia)
 RTC_DATA_ATTR static int diaAcordou = -1;    // tm_yday em que acordou antes da hora (chacoalhou)
 
+#ifdef TESTE_DESP_HORA
+static bool diaDeSemana(const struct tm&) { return true; }
+#else
 static bool diaDeSemana(const struct tm& t) { return t.tm_wday >= 1 && t.tm_wday <= 5; }
+#endif
 
 // minuto do dia (0-1439) em que a noite acaba nessa manhã
 static int fimDaNoiteMin(const struct tm& t) {
@@ -617,6 +625,9 @@ static int fimDaNoiteMin(const struct tm& t) {
 static bool ehNoite() {
   struct tm t;
   if (!getLocalTime(&t, 0)) return false;  // ainda sem hora: considera dia
+#ifdef TESTE_DESP_HORA
+  return t.tm_yday != diaAcordou && t.tm_hour * 60 + t.tm_min < fimDaNoiteMin(t);
+#endif
   if (t.tm_hour >= NOITE_INICIO) return true;
   if (t.tm_yday == diaAcordou) return false;  // chacoalhou de manhã: já acordou
   // a noite acaba pelo relógio (não pelo despertador ter tocado): se o ESP reiniciar
@@ -639,9 +650,15 @@ static void voltaProBase(bool comSom) {
 // (o estado do pato mora no servidor). O relógio interno do sono deriva alguns %, então ele
 // dorme só 90% do que falta, acerta a hora pelo RTC (BM8563, de cristal) e dorme de novo;
 // faltando menos de SONO_MIN_S, fica acordado esperando.
+#ifdef TESTE_DESP_HORA  // simulação: tudo encurtado
+static constexpr uint32_t SONO_OCIOSO_MS = 10000;
+static constexpr long SONO_MIN_S = 20;
+static constexpr long SONO_ANTECEDENCIA_S = 30;
+#else
 static constexpr uint32_t SONO_OCIOSO_MS = 60000;  // 1 min sem mexer de noite -> dorme
 static constexpr long SONO_MIN_S = 5 * 60;
 static constexpr long SONO_ANTECEDENCIA_S = 120;   // acorda 2 min antes do despertador (boot + WiFi)
+#endif
 static constexpr uint32_t SONO_TESTE_S = 120;       // debug: botão B
 static constexpr const char* FUSO = "<-03>3";       // Brasília
 RTC_DATA_ATTR static bool sonoDeTeste = false;

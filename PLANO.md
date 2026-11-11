@@ -44,6 +44,7 @@ Barra de ícones embaixo, um por botão:
 - **Segurar no pato 10 s:** painel de debug (WiFi, IP, servidor, fome, hora, última gravação/resposta/erro, bateria, memória).
 - **Despertador:** seg–sex 6:15, o pato acorda fazendo quack feliz com luzes, vibração e o relógio piscando. Toque na tela ou qualquer botão desliga. Teste: painel de debug aberto + toque curto no C.
 - **Sono profundo:** de noite, na bateria, 1 min sem mexer -> deep sleep (tela e WiFi desligados). Toque na tela acorda; o timer acorda 2 min antes do despertador (sáb/dom: 8h), passando pelo RTC pra acertar a hora no meio. Na tomada não dorme. Teste: painel de debug + B (dorme 2 min).
+- **Simulação do despertador:** `PLATFORMIO_BUILD_FLAGS="-DTESTE_DESP_HORA=7 -DTESTE_DESP_MIN=23" pio run -t upload` (noite até essa hora, tudo encurtado: dorme com 10 s parado, acorda 30 s antes). Depois grava a versão normal de novo.
 - Nenhum texto de opinião na tela: o pato só reage.
 
 ---
