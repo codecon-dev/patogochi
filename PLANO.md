@@ -72,7 +72,7 @@ Barra de ícones embaixo, um por botão:
 |---|---|---|
 | `pipoca` | Conteúdo / vídeo | `empolgado` |
 | `moeda_chocolate` | Negócio / dinheiro | `empolgado` |
-| `biscoito_sorte` | Ideia com prazo (vira lembrete) | `ouvindo` ("anotado") |
+| `biscoito_sorte` | Ideia com prazo (vira lembrete) | `parado` (neutro) |
 | `minhoca` | Sem pé nem cabeça | `debochando` |
 | `comida_estragada` | Ideia ruim | `passando_mal` |
 

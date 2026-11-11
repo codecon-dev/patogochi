@@ -310,7 +310,7 @@ static int indiceComida(const char* nome) {
 // reação depois de comer sai da comida (o "estado" do /ideia.php é ignorado, igual ao estado base)
 static Anim reacaoDaComida(int c) {
   switch (c) {
-    case FOOD_BISCOITO_SORTE:   return ANIM_OUVINDO;      // tarefa: "anotado", sem festa
+    case FOOD_BISCOITO_SORTE:   return ANIM_PARADO;       // tarefa: neutro, sem festa
     case FOOD_MINHOCA:          return ANIM_DEBOCHANDO;
     case FOOD_COMIDA_ESTRAGADA: return ANIM_PASSANDO_MAL;
     default:                    return ANIM_EMPOLGADO;    // pipoca, moeda de chocolate
